@@ -1,4 +1,4 @@
-# card0 workbench
+# littlebench
 
 A Mac desktop app (Electron + React) that turns a YouTube channel into a stream of published card0 games. It runs real Claude Code sessions headlessly using the `card0-game-create` skill, shows the agent working live, and tracks every game from video to submission.
 
@@ -35,7 +35,12 @@ npm run typecheck
 - `claude` CLI logged in (`claude login`) - the agent runs on your Claude subscription
 - `yt-dlp` on PATH (channel ingest)
 - `card0` CLI logged in (`card0 login`) - game creation/upload/submit
-- The `card0-game-create` skill in `~/.claude/skills/` (agent uses it via Stage instructions)
+- The skills from `skills/` installed into `~/.claude/skills/` (agents load user-level skills):
+
+  ```bash
+  cp -R skills/card0-game-create skills/byted-ark-seedream-skill ~/.claude/skills/
+  ```
+
 - The Seedream skill + Ark API key in your shell env (card art generation)
 
 ## Notes
