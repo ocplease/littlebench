@@ -41,9 +41,10 @@ export const YTDLP_BIN = resolveBin('yt-dlp', [
 
 export const CARD0_BIN = resolveBin('card0', ['/usr/local/bin/card0', '/opt/homebrew/bin/card0'])
 
-/** Workbench root: all job workspaces + the database live here. */
+/** Workbench root: all job workspaces + the database live here.
+ *  Override with CARD0_WORKBENCH_ROOT (handy for tests/relocation). */
 export function workbenchRoot(): string {
-  return path.join(homedir(), 'card0-workbench')
+  return process.env.CARD0_WORKBENCH_ROOT || path.join(homedir(), 'Projects/card0/card0-workbench')
 }
 
 export function jobsRoot(): string {

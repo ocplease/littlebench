@@ -49,7 +49,7 @@ Electron app
 ```
 
 ### Job workspaces
-Every job gets `~/card0-workbench/jobs/<jobId>/` as the agent's cwd:
+Every job gets `~/Projects/card0/card0-workbench/jobs/<jobId>/` as the agent's cwd:
 ```
 manifest.json        cards_plan.json    cards_raw/    compressed/
 cover.jpg            card_ids.json      result.json   events.jsonl (mirror)
@@ -72,7 +72,7 @@ All artifacts land in a known place — that's what the gallery watcher and revi
 claude -p "<driving prompt>" \
   --output-format stream-json --verbose \
   --session-id <uuid>            # enables later --resume
-  --cwd ~/card0-workbench/jobs/<jobId>
+  --cwd ~/Projects/card0/card0-workbench/jobs/<jobId>
   --permission-mode acceptEdits  # + explicit allowlist, see below
   --model <from settings>
 ```
@@ -125,7 +125,7 @@ The stage stepper in the UI is this table rendered. Failed stage → red chip + 
 
 ---
 
-## 5. Data model (SQLite: `~/card0-workbench/workbench.db`)
+## 5. Data model (SQLite: `~/Projects/card0/card0-workbench/workbench.db`)
 
 ```sql
 videos(id, youtube_id, channel, title, duration_s, url,

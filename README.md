@@ -26,7 +26,7 @@ npm run typecheck
 
 ## What lives where
 
-- `~/card0-workbench/` - workbench root
+- `~/Projects/card0/card0-workbench/` - workbench root
   - `workbench.db` - SQLite (videos, jobs, events, games, settings)
   - `jobs/<jobId>/` - per-job agent workspace (manifest, cards_raw/, compressed/, result.json)
 
