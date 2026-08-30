@@ -17,6 +17,58 @@ export const STAGES = [
 
 export type StageId = (typeof STAGES)[number]['id']
 
+/** Six UX phases the workbench surfaces; each maps to a span of skill stages.
+ *  The board stays readable; the Workspace can expand a phase into its stages. */
+export const PHASES = [
+  {
+    id: 'understand',
+    label: 'Understand',
+    detail: 'video -> game spec',
+    stages: ['transcript'] as StageId[]
+  },
+  {
+    id: 'design',
+    label: 'Design',
+    detail: 'manifest + validation',
+    stages: ['manifest', 'validate'] as StageId[]
+  },
+  {
+    id: 'art_direction',
+    label: 'Art Direction',
+    detail: 'cover + card plan',
+    stages: ['plan'] as StageId[]
+  },
+  {
+    id: 'production',
+    label: 'Production',
+    detail: 'artwork + compression',
+    stages: ['art', 'compress'] as StageId[]
+  },
+  {
+    id: 'integration',
+    label: 'Integration',
+    detail: 'card0 create + upload',
+    stages: ['create', 'upload'] as StageId[]
+  },
+  {
+    id: 'qa_publish',
+    label: 'QA & Publish',
+    detail: 'review + submit',
+    stages: ['review', 'submit'] as StageId[]
+  }
+] as const
+
+export type PhaseId = (typeof PHASES)[number]['id']
+
+/** Which UX phase a skill stage belongs to (first match wins). */
+export function phaseForStage(stage: string | null | undefined): PhaseId | null {
+  if (!stage) return null
+  for (const p of PHASES) {
+    if ((p.stages as readonly string[]).includes(stage)) return p.id
+  }
+  return null
+}
+
 export interface StageUpdate {
   stage: StageId
   detail?: string

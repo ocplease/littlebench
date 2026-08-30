@@ -11,6 +11,12 @@ export interface Video {
   status: 'new' | 'triaging' | 'candidate' | 'rejected' | 'queued'
   triage_reason: string | null
   added_at: string
+  /** scout funnel */
+  classification: string | null
+  fit_score: number | null
+  fit_reasons: string | null
+  rights_status: string | null
+  thumbnail_url: string | null
 }
 
 export interface Job {
@@ -18,7 +24,7 @@ export interface Job {
   video_id: number | null
   title: string
   youtube_url: string | null
-  status: 'queued' | 'running' | 'awaiting_review' | 'submitted' | 'failed' | 'interrupted' | 'discarded'
+  status: 'queued' | 'running' | 'awaiting_review' | 'needs_input' | 'submitted' | 'failed' | 'interrupted' | 'discarded'
   language: string
   parent_job_id: string | null
   session_id: string | null
@@ -30,6 +36,9 @@ export interface Job {
   created_at: string
   started_at: string | null
   finished_at: string | null
+  /** workbench protocol */
+  phase: string | null
+  needs_input: string | null
 }
 
 export interface Game {
@@ -51,12 +60,32 @@ export interface Artifact {
   file: string
 }
 
+/** Protocol-declared artifact (from .workbench/tasks.json). */
+export interface ProtocolArtifactRow {
+  id: number
+  job_id: string
+  type: string
+  path: string
+  label: string | null
+  created_at: string
+}
+
+export interface Message {
+  id: number
+  job_id: string
+  role: string
+  content: string
+  artifact_path: string | null
+  created_at: string
+}
+
 export interface Settings {
   model: string
   triageModel: string
   autoQueue: string
   bypassPermissions: string
   maxVideos: string
+  maxWorkers: string
 }
 
 export interface IngestResult {
@@ -77,6 +106,7 @@ export interface WorkbenchApi {
   setVideoStatus(id: number, status: string, reason: string | null): Promise<void>
   ingestChannel(url: string, max?: number): Promise<IngestResult>
   runTriage(videoIds: number[]): Promise<boolean>
+  deepScout(videoId: number): Promise<{ ok: boolean; error?: string }>
 
   listJobs(): Promise<Job[]>
   getJob(id: string): Promise<Job | null>
@@ -88,11 +118,16 @@ export interface WorkbenchApi {
   restartJob(id: string): Promise<boolean>
   jobEvents(id: string): Promise<unknown[]>
   localizeJob(jobId: string, language: string): Promise<string | null>
+  steerJob(id: string, message: string, artifactPath?: string): Promise<ApproveResult>
+  jobIsLive(id: string): Promise<boolean>
+  jobMessages(id: string): Promise<Message[]>
 
   listGames(): Promise<Game[]>
   openGame(gameId: string): Promise<ApproveResult>
   listArtifacts(jobId: string): Promise<Artifact[]>
+  listProtocolArtifacts(jobId: string): Promise<ProtocolArtifactRow[]>
   readArtifact(jobId: string, rel: string): Promise<string | null>
+  readTextArtifact(jobId: string, rel: string): Promise<string | null>
 
   bootstrap(): Promise<boolean>
   on(channel: string, cb: (payload: unknown) => void): () => void

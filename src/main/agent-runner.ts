@@ -28,6 +28,8 @@ export interface AgentRunOptions {
   bypassPermissions?: boolean
   allowedTools?: string[]
   sessionId?: string
+  /** Continue an existing session (steering) instead of starting fresh. */
+  resumeSessionId?: string
   onEvent: (event: ClaudeStreamEvent) => void
   onStderr: (text: string) => void
   onExit: (code: number | null, signal: NodeJS.Signals | null) => void
@@ -44,9 +46,14 @@ export function runAgent(opts: AgentRunOptions): AgentRun {
   const args = [
     '-p', opts.prompt,
     '--output-format', 'stream-json',
-    '--verbose',
-    '--session-id', sessionId
+    '--verbose'
   ]
+  if (opts.resumeSessionId) {
+    // steering: continue the existing conversation
+    args.push('--resume', opts.resumeSessionId)
+  } else {
+    args.push('--session-id', sessionId)
+  }
   if (opts.model) args.push('--model', opts.model)
   if (opts.bypassPermissions) {
     args.push('--dangerously-skip-permissions')

@@ -5,6 +5,8 @@ import path from 'node:path'
 import { runAgent, AgentRun, ClaudeStreamEvent } from './agent-runner'
 import { detectStage } from './stages'
 import { jobWorkspace, CARD0_BIN, shellEnv } from './paths'
+import { parseProtocol, applyProtocol, PROTOCOL_CONTRACT } from './protocol'
+import { insertMessage } from './db'
 import {
   getJob, getSetting, insertJob, listJobs, updateJob, appendEvent, upsertGame,
   listEvents, JobRow
@@ -70,6 +72,17 @@ function anyLiveRun(exceptJobId?: string): boolean {
   return listJobs().some((j) => j.status === 'running' && j.id !== exceptJobId && jobIsLive(j))
 }
 
+/** How many agents are actually running (this process + lockfiles elsewhere). */
+function liveRunCount(exceptJobId?: string): number {
+  return listJobs().filter((j) => j.status === 'running' && j.id !== exceptJobId && jobIsLive(j)).length
+}
+
+/** Max concurrent builder sessions (design: 3 workers). */
+function maxWorkers(): number {
+  const n = Number(getSetting('maxWorkers', '3'))
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 3
+}
+
 // ---------- prompts ----------
 
 /** Backend constraint shared by all prompts: this model endpoint rejects image input. */
@@ -98,7 +111,8 @@ export function buildGamePrompt(job: JobRow): string {
     '  (omit deckIds keys that do not apply to this game)',
     '- Use the byted-ark-seedream-skill for all image generation; save generated art under',
     '  this workspace (cards_raw/ for PNGs, compressed/ for JPEGs).',
-    NO_IMAGE_INPUT
+    NO_IMAGE_INPUT,
+    PROTOCOL_CONTRACT
   ]
   return lines.join('\n')
 }
@@ -116,7 +130,8 @@ export function buildLocalizePrompt(parent: JobRow, language: 'zh-Hans' | 'ja'):
     '- Work inside the current directory (this is your job workspace).',
     '- CRITICAL: Do NOT run `card0 game submit`. A human reviews the cards first.',
     '- Write result.json in this directory with the same shape as the English job.',
-    NO_IMAGE_INPUT
+    NO_IMAGE_INPUT,
+    PROTOCOL_CONTRACT
   ].join('\n')
 }
 
@@ -150,7 +165,7 @@ export function createJob(input: {
 export function startJob(jobId: string): void {
   const job = getJob(jobId)
   if (!job || job.status === 'running' || running.has(jobId)) return
-  if (anyLiveRun()) return // v1: single agent across ALL processes
+  if (liveRunCount(jobId) >= maxWorkers()) return // all worker slots busy
 
   const prompt =
     job.language === 'en'
@@ -160,14 +175,19 @@ export function startJob(jobId: string): void {
   executeJobWithPrompt(jobId, prompt)
 }
 
-/** Run a job with an explicit prompt (used by startJob and the CLI driver). */
-export function executeJobWithPrompt(jobId: string, prompt: string): void {
+/** Run a job with an explicit prompt (used by startJob, steering and the CLI driver). */
+export function executeJobWithPrompt(
+  jobId: string,
+  prompt: string,
+  opts: { resumeSessionId?: string } = {}
+): void {
   const job = getJob(jobId)
   if (!job || job.status === 'running' || running.has(jobId)) return
-  if (anyLiveRun(jobId)) return
+  if (!opts.resumeSessionId && liveRunCount(jobId) >= maxWorkers()) return
 
   const workspace = jobWorkspace(jobId)
   mkdirSync(workspace, { recursive: true })
+  mkdirSync(path.join(workspace, '.workbench'), { recursive: true })
 
   const model = getSetting('model', '')
   const bypass = getSetting('bypassPermissions', 'true') === 'true'
@@ -175,12 +195,21 @@ export function executeJobWithPrompt(jobId: string, prompt: string): void {
   updateJob(jobId, { status: 'running', started_at: new Date().toISOString(), error: null })
 
   let seq = 0
+
+  // workbench protocol: poll the agent-maintained tasks.json and mirror it
+  let prevProtocolJson: string | null = null
+  const pollProtocol = () => {
+    const parsed = parseProtocol(jobId)
+    if (parsed) prevProtocolJson = applyProtocol(jobId, parsed, prevProtocolJson) ? JSON.stringify(parsed) : prevProtocolJson
+  }
+
   const run = runAgent({
     cwd: workspace,
     prompt,
     model: model || undefined,
     bypassPermissions: bypass,
-    sessionId: job.session_id ?? undefined,
+    sessionId: opts.resumeSessionId ? undefined : (job.session_id ?? undefined),
+    resumeSessionId: opts.resumeSessionId,
     onEvent: (event) => {
       // Noise filter: thinking-token streams (thousands per job), hook chatter and
       // tool progress are not worth persisting or shipping over IPC.
@@ -194,6 +223,7 @@ export function executeJobWithPrompt(jobId: string, prompt: string): void {
         updateJob(jobId, { stage: stage.stage, stage_detail: stage.detail ?? null })
         emit('job:stage', { jobId, ...stage })
       }
+      pollProtocol() // cheap: no-op unless the file changed
       if (event.type === 'system' && event.session_id) {
         updateJob(jobId, { session_id: String(event.session_id) })
       }
@@ -217,7 +247,9 @@ export function executeJobWithPrompt(jobId: string, prompt: string): void {
     },
     onExit: (code) => {
       running.delete(jobId)
+      clearInterval(protocolTimer)
       clearLock(jobId)
+      pollProtocol() // catch a final write the stream events didn't cover
       const current = getJob(jobId)
       if (current && current.status === 'running') {
         // exited without a result event
@@ -233,6 +265,9 @@ export function executeJobWithPrompt(jobId: string, prompt: string): void {
     }
   })
 
+  const protocolTimer = setInterval(pollProtocol, 2000)
+  protocolTimer.unref()
+
   running.set(jobId, run)
   writeLock(jobId, run.process.pid ?? -1)
   emit('jobs:changed', null)
@@ -241,7 +276,7 @@ export function executeJobWithPrompt(jobId: string, prompt: string): void {
 function finalizeJob(jobId: string, result: ClaudeStreamEvent): void {
   const game = parseResultJson(jobId)
   updateJob(jobId, {
-    status: 'awaiting_review',
+    status: finalStatus(jobId),
     card0_game_id: game?.gameId ?? null,
     result_json: game ? JSON.stringify(game) : null,
     finished_at: new Date().toISOString()
@@ -250,10 +285,16 @@ function finalizeJob(jobId: string, result: ClaudeStreamEvent): void {
   emit('jobs:changed', null)
 }
 
+/** Agent finished its pass: awaiting review, or blocked on a human question. */
+function finalStatus(jobId: string): 'awaiting_review' | 'needs_input' {
+  const protocol = parseProtocol(jobId)
+  return protocol?.needs_input ? 'needs_input' : 'awaiting_review'
+}
+
 /** Agent exited cleanly but we never saw a result event - try result.json anyway. */
 function finalizeFromDisk(jobId: string): void {
   const game = parseResultJson(jobId)
-  updateJob(jobId, { status: 'awaiting_review', finished_at: new Date().toISOString() })
+  updateJob(jobId, { status: finalStatus(jobId), finished_at: new Date().toISOString() })
   recordGame(jobId, game)
   emit('jobs:changed', null)
 }
@@ -348,18 +389,59 @@ export function discardJob(jobId: string): void {
 export function restartJob(jobId: string): void {
   updateJob(jobId, {
     status: 'queued', error: null, stage: null, stage_detail: null, finished_at: null,
-    session_id: null // fresh session; workspace artifacts on disk are reused
+    session_id: null, // fresh session; workspace artifacts on disk are reused
+    phase: null, needs_input: null
   })
   emit('jobs:changed', null)
   pumpQueue()
 }
 
-/** Auto-advance: start the next queued job whenever nothing is running anywhere. */
+/** Steering: send the human's instruction into the job's session.
+ *  Works when no worker is actively running the job - we resume the existing
+ *  claude session with the message (plus artifact context if attached), run it
+ *  through the same event pipeline, and land back in review/needs_input.
+ *  Mid-run injection (streaming stdin) is future work. */
+export function steerJob(jobId: string, message: string, artifactPath?: string | null): { ok: boolean; error?: string } {
+  const job = getJob(jobId)
+  if (!job) return { ok: false, error: 'job not found' }
+  if (job.status === 'running' || running.has(jobId) || jobIsLive(job)) {
+    return { ok: false, error: 'worker is actively running this job - steer after it finishes this pass' }
+  }
+  if (liveRunCount(jobId) >= maxWorkers()) {
+    return { ok: false, error: `all ${maxWorkers()} worker slots busy` }
+  }
+  if (!job.session_id) return { ok: false, error: 'no session to resume - use Restart instead' }
+
+  insertMessage(jobId, 'user', message, artifactPath ?? null)
+
+  const context = artifactPath
+    ? `\n\nThe user is referring to this artifact: ${artifactPath} (in the current workspace).`
+    : ''
+  const prompt = [
+    'The human reviewing this game sent you a message. Apply it now:',
+    '',
+    `"${message}"`,
+    context,
+    '',
+    'Continue in this same workspace. Update .workbench/tasks.json as you work.',
+    'If you change the card0 game, update result.json afterwards.',
+    'Do NOT run `card0 game submit` - the human still reviews before publishing.',
+    NO_IMAGE_INPUT
+  ].join('\n')
+
+  executeJobWithPrompt(jobId, prompt, { resumeSessionId: job.session_id })
+  return { ok: true }
+}
+
+/** Auto-advance: keep up to maxWorkers agents running. */
 export function pumpQueue(): void {
-  if (running.size > 0 || anyLiveRun()) return
   if (getSetting('autoQueue', 'true') !== 'true') return
-  const next = listJobs().find((j) => j.status === 'queued')
-  if (next) startJob(next.id)
+  const slots = maxWorkers() - liveRunCount()
+  if (slots <= 0) return
+  const queued = listJobs().filter((j) => j.status === 'queued')
+  for (const job of queued.slice(0, slots)) {
+    startJob(job.id)
+  }
 }
 
 /** On app launch: a 'running' job with a dead agent PID is a crash leftover. */

@@ -8,6 +8,7 @@ export type JobStatus =
   | 'queued'
   | 'running'
   | 'awaiting_review'
+  | 'needs_input'
   | 'submitted'
   | 'failed'
   | 'interrupted'
@@ -23,6 +24,12 @@ export interface VideoRow {
   status: VideoStatus
   triage_reason: string | null
   added_at: string
+  /** scout funnel (cheap pass) */
+  classification: string | null
+  fit_score: number | null
+  fit_reasons: string | null
+  rights_status: string | null
+  thumbnail_url: string | null
 }
 
 export interface JobRow {
@@ -42,6 +49,9 @@ export interface JobRow {
   created_at: string
   started_at: string | null
   finished_at: string | null
+  /** workbench protocol (tasks.json) fields */
+  phase: string | null
+  needs_input: string | null
 }
 
 let db: DatabaseSync | null = null
@@ -118,7 +128,44 @@ function migrate(db: DatabaseSync): void {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS artifacts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      job_id TEXT NOT NULL,
+      type TEXT NOT NULL,
+      path TEXT NOT NULL,
+      label TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_artifacts_job ON artifacts(job_id);
+
+    CREATE TABLE IF NOT EXISTS messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      job_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      artifact_path TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_messages_job ON messages(job_id);
   `)
+
+  // Additive column migrations for DBs created before the factory redesign.
+  const addColumns: Array<[string, string, string]> = [
+    ['videos', 'classification', 'TEXT'],
+    ['videos', 'fit_score', 'REAL'],
+    ['videos', 'fit_reasons', 'TEXT'],
+    ['videos', 'rights_status', 'TEXT'],
+    ['videos', 'thumbnail_url', 'TEXT'],
+    ['jobs', 'phase', 'TEXT'],
+    ['jobs', 'needs_input', 'TEXT']
+  ]
+  for (const [table, col, type] of addColumns) {
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all() as unknown as Array<{ name: string }>
+    if (!cols.some((c) => c.name === col)) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`)
+    }
+  }
 }
 
 // ---------- settings ----------
@@ -138,15 +185,20 @@ export function setSetting(key: string, value: string): void {
 
 // ---------- videos ----------
 
-export function upsertVideos(videos: Array<Omit<VideoRow, 'id' | 'status' | 'triage_reason' | 'added_at'>>): number {
+export function upsertVideos(
+  videos: Array<
+    Omit<VideoRow, 'id' | 'status' | 'triage_reason' | 'added_at' | 'classification' | 'fit_score' | 'fit_reasons' | 'rights_status'> & { thumbnail_url?: string | null }
+  >
+): number {
   const stmt = getDb().prepare(`
-    INSERT INTO videos (youtube_id, channel, title, duration_s, url, status)
-    VALUES (?, ?, ?, ?, ?, 'new')
-    ON CONFLICT(youtube_id) DO UPDATE SET title = excluded.title, duration_s = excluded.duration_s
+    INSERT INTO videos (youtube_id, channel, title, duration_s, url, thumbnail_url, status)
+    VALUES (?, ?, ?, ?, ?, ?, 'new')
+    ON CONFLICT(youtube_id) DO UPDATE SET title = excluded.title, duration_s = excluded.duration_s,
+      thumbnail_url = COALESCE(excluded.thumbnail_url, thumbnail_url)
   `)
   let added = 0
   for (const v of videos) {
-    const res = stmt.run(v.youtube_id, v.channel, v.title, v.duration_s, v.url)
+    const res = stmt.run(v.youtube_id, v.channel, v.title, v.duration_s, v.url, v.thumbnail_url ?? null)
     if (Number(res.changes) > 0) added++
   }
   return added
@@ -160,6 +212,21 @@ export function listVideos(): VideoRow[] {
 
 export function updateVideoStatus(id: number, status: VideoStatus, reason: string | null): void {
   getDb().prepare('UPDATE videos SET status = ?, triage_reason = ? WHERE id = ?').run(status, reason, id)
+}
+
+/** Scout verdict: classification, weighted fit score, reasons, rights status. */
+export function updateVideoScout(
+  id: number,
+  scout: {
+    classification: string | null
+    fit_score: number | null
+    fit_reasons: string | null
+    rights_status: string | null
+  }
+): void {
+  getDb()
+    .prepare('UPDATE videos SET classification = ?, fit_score = ?, fit_reasons = ?, rights_status = ? WHERE id = ?')
+    .run(scout.classification, scout.fit_score, scout.fit_reasons, scout.rights_status, id)
 }
 
 // ---------- jobs ----------
@@ -193,7 +260,7 @@ export function getJob(id: string): JobRow | undefined {
 export function updateJob(id: string, fields: Partial<JobRow>): void {
   const allowed: Array<keyof JobRow> = [
     'status', 'stage', 'stage_detail', 'error', 'card0_game_id',
-    'result_json', 'session_id', 'started_at', 'finished_at'
+    'result_json', 'session_id', 'started_at', 'finished_at', 'phase', 'needs_input'
   ]
   const sets: string[] = []
   const vals: unknown[] = []
@@ -226,8 +293,9 @@ export function appendEvent(jobId: string, seq: number, type: string, payload: u
 }
 
 export function listEvents(jobId: string): EventRow[] {
+  // insertion order = chronological (protocol events share seq 0 with each other)
   return getDb()
-    .prepare('SELECT * FROM events WHERE job_id = ? ORDER BY seq ASC')
+    .prepare('SELECT * FROM events WHERE job_id = ? ORDER BY id ASC')
     .all(jobId) as unknown as EventRow[]
 }
 
@@ -288,4 +356,57 @@ export function upsertGame(game: {
 
 export function listGames(): GameRow[] {
   return getDb().prepare('SELECT * FROM games ORDER BY id DESC').all() as unknown as GameRow[]
+}
+
+// ---------- artifacts (protocol-declared, distinct from the file gallery) ----------
+
+export interface ArtifactRow {
+  id: number
+  job_id: string
+  type: string
+  path: string
+  label: string | null
+  created_at: string
+}
+
+export function upsertArtifact(jobId: string, a: { type: string; path: string; label?: string | null }): void {
+  const existing = getDb()
+    .prepare('SELECT id FROM artifacts WHERE job_id = ? AND path = ?')
+    .get(jobId, a.path) as unknown as { id: number } | undefined
+  if (existing) {
+    getDb().prepare('UPDATE artifacts SET type = ?, label = ? WHERE id = ?').run(a.type, a.label ?? null, existing.id)
+  } else {
+    getDb()
+      .prepare('INSERT INTO artifacts (job_id, type, path, label) VALUES (?, ?, ?, ?)')
+      .run(jobId, a.type, a.path, a.label ?? null)
+  }
+}
+
+export function listArtifactsByJob(jobId: string): ArtifactRow[] {
+  return getDb()
+    .prepare('SELECT * FROM artifacts WHERE job_id = ? ORDER BY id ASC')
+    .all(jobId) as unknown as ArtifactRow[]
+}
+
+// ---------- messages (steering discussion) ----------
+
+export interface MessageRow {
+  id: number
+  job_id: string
+  role: string
+  content: string
+  artifact_path: string | null
+  created_at: string
+}
+
+export function insertMessage(jobId: string, role: string, content: string, artifactPath?: string | null): void {
+  getDb()
+    .prepare('INSERT INTO messages (job_id, role, content, artifact_path) VALUES (?, ?, ?, ?)')
+    .run(jobId, role, content, artifactPath ?? null)
+}
+
+export function listMessages(jobId: string): MessageRow[] {
+  return getDb()
+    .prepare('SELECT * FROM messages WHERE job_id = ? ORDER BY id ASC')
+    .all(jobId) as unknown as MessageRow[]
 }

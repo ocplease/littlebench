@@ -57,8 +57,21 @@ export default function SettingsView() {
         />
       </div>
       <div className="setting-row">
-        <label>Max videos per ingest</label>
+        <label>
+          Max videos per ingest
+        </label>
         <input value={s.maxVideos} onChange={(e) => setS({ ...s, maxVideos: e.target.value })} />
+      </div>
+      <div className="setting-row">
+        <label>
+          Worker slots
+          <span className="muted small">concurrent builder sessions (card0 uploads are serialized per game)</span>
+        </label>
+        <input
+          value={s.maxWorkers}
+          onChange={(e) => setS({ ...s, maxWorkers: e.target.value })}
+          placeholder="3"
+        />
       </div>
       <button className="primary" onClick={save}>
         {saved ? 'Saved ✓' : 'Save'}

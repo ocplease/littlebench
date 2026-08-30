@@ -2,10 +2,10 @@ import { app, BrowserWindow, ipcMain } from 'electron'
 import path from 'node:path'
 import { readFileSync, existsSync } from 'node:fs'
 import { ensureDirs, jobWorkspace } from './paths'
-import { getDb, getSetting, setSetting, listVideos, listJobs, getJob, listGames } from './db'
-import { setBroadcast, createJob, startJob, stopJob, approveJob, discardJob, restartJob, jobEventsFromDb, listArtifacts, recoverInterrupted, pumpQueue, openGame } from './jobs'
-import { ingestChannel, triageVideos } from './ingest'
-import { updateVideoStatus } from './db'
+import { getDb, getSetting, setSetting, listVideos, listJobs, getJob, listGames, listArtifactsByJob, listMessages } from './db'
+import { setBroadcast, createJob, startJob, stopJob, approveJob, discardJob, restartJob, steerJob, jobEventsFromDb, listArtifacts, recoverInterrupted, pumpQueue, openGame, jobIsLive } from './jobs'
+import { ingestChannel, scoutVideos, deepScoutVideo } from './ingest'
+import { updateVideoStatus, updateVideoScout } from './db'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -21,7 +21,7 @@ function createWindow(): void {
     height: 900,
     minWidth: 1000,
     minHeight: 640,
-    title: 'card0 workbench',
+    title: 'littlebench',
     backgroundColor: '#0d1117',
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
@@ -50,7 +50,8 @@ function registerIpc(): void {
     triageModel: getSetting('triageModel', 'haiku'),
     autoQueue: getSetting('autoQueue', 'true'),
     bypassPermissions: getSetting('bypassPermissions', 'true'),
-    maxVideos: getSetting('maxVideos', '50')
+    maxVideos: getSetting('maxVideos', '50'),
+    maxWorkers: getSetting('maxWorkers', '3')
   }))
   handle('settings:set', (s: Record<string, string>) => {
     for (const [k, v] of Object.entries(s)) setSetting(k, v)
@@ -66,10 +67,32 @@ function registerIpc(): void {
     return await ingestChannel(url, m)
   })
   handle('triage:run', async (videoIds: number[]) => {
-    void triageVideos(videoIds, (id, status, reason) => {
-      broadcast('videos:changed', { id, status, reason })
+    void scoutVideos(videoIds, (id, status, verdict) => {
+      broadcast('videos:changed', { id, status, verdict })
     })
     return true // runs async; UI gets updates via videos:changed
+  })
+  handle('scout:deep', async (videoId: number) => {
+    const video = listVideos().find((v) => v.id === videoId)
+    if (!video) return { ok: false, error: 'video not found' }
+    try {
+      const verdict = await deepScoutVideo(video)
+      updateVideoScout(videoId, {
+        classification: verdict.classification,
+        fit_score: verdict.fit_score,
+        fit_reasons: JSON.stringify(verdict.fit_reasons),
+        rights_status: verdict.rights_status
+      })
+      updateVideoStatus(
+        videoId,
+        verdict.classification === 'GAME_TUTORIAL' || verdict.classification === 'PLAYTHROUGH' ? 'candidate' : 'rejected',
+        verdict.reason
+      )
+      broadcast('videos:changed', { id: videoId })
+      return { ok: true, verdict }
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
   })
 
   handle('jobs:list', () => listJobs())
@@ -102,6 +125,12 @@ function registerIpc(): void {
     return true
   })
   handle('jobs:events', (id: string) => jobEventsFromDb(id))
+  handle('jobs:steer', (id: string, message: string, artifactPath?: string) => steerJob(id, message, artifactPath ?? null))
+  handle('jobs:isLive', (id: string) => {
+    const job = getJob(id)
+    return job ? jobIsLive(job) : false
+  })
+  handle('jobs:messages', (id: string) => listMessages(id))
   handle('jobs:localize', (jobId: string, language: string) => {
     const parent = getJob(jobId)
     if (!parent) return null
@@ -117,6 +146,7 @@ function registerIpc(): void {
   handle('games:open', (gameId: string) => openGame(gameId))
 
   handle('artifacts:list', (jobId: string) => listArtifacts(jobId))
+  handle('artifacts:protocol', (jobId: string) => listArtifactsByJob(jobId))
   handle('artifacts:read', (jobId: string, rel: string) => {
     // only serve files inside the job workspace
     const root = jobWorkspace(jobId)
@@ -126,6 +156,15 @@ function registerIpc(): void {
     const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg'
     const data = readFileSync(full)
     return `data:${mime};base64,${data.toString('base64')}`
+  })
+  handle('artifacts:readText', (jobId: string, rel: string) => {
+    // text artifacts (manifest.json, cards_plan.json...) for the artifact panel
+    const root = jobWorkspace(jobId)
+    const full = path.resolve(root, rel)
+    if (!full.startsWith(root) || !existsSync(full)) return null
+    const stat = readFileSync(full)
+    if (stat.length > 512 * 1024) return null
+    return stat.toString('utf8')
   })
 
   handle('workbench:bootstrap', () => {

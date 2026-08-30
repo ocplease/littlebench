@@ -1,8 +1,8 @@
 # littlebench
 
-A Mac desktop app (Electron + React) that turns a YouTube channel into a stream of published card0 games. It runs real Claude Code sessions headlessly using the `card0-game-create` skill, shows the agent working live, and tracks every game from video to submission.
+A Mac desktop app (Electron + React) that runs an autonomous card-game factory: point it at a YouTube channel, a scout agent scores which videos can become games, and up to three concurrent Claude Code builder sessions turn them into card0 games using the `card0-game-create` skill - with a Linear-style board to watch it all happen and human gates before anything is published.
 
-See `PLAN.md` for the full product/implementation plan.
+The workbench owns orchestration and state; Claude owns execution. See `PLAN.md` for the architecture.
 
 ## Run it
 
@@ -15,25 +15,27 @@ npm run typecheck
 
 ## How to use
 
-1. **Channels** - paste a YouTube channel URL (e.g. `https://www.youtube.com/@somechannel/videos`), hit **Ingest**, then **Triage new**. A cheap model filters game-tutorial videos from everything else.
-2. Select candidates (or **Queue all candidates**) - each becomes a **job**.
-3. **Jobs** - the queue auto-advances (one agent at a time). Click a running job to watch:
-   - the 10-stage pipeline stepper (transcript → manifest → … → submit)
-   - the live agent transcript
-   - the card-art gallery, images appearing as they're generated
-4. When the agent finishes, the job pauses as **Awaiting review** - inspect the gallery, then **Approve & submit** (publishes to card0) or Discard.
-5. **History** - submitted games, with **Localize 中文 / 日本語** buttons that spawn localization jobs.
+1. **Sources** - paste a YouTube channel URL and hit **Add channel**. **Scout new videos** runs the cheap pass (metadata-only classification + Card0 Fit score + rights status). **Deep scout** fetches transcripts for shortlisted videos and refines the score.
+2. Select candidates (or hit **Build game** on a card) - each becomes a job on the **Factory** board.
+3. **Factory** - the board: Candidates / Queued / Building / Review / Published. Up to 3 builder workers run concurrently (worker dots in the header). Click any card to open its workspace.
+4. **Game Workspace** - three columns:
+   - **Tasks**: the six phases (Understand / Design / Art Direction / Production / Integration / QA & Publish), expandable into the skill's ten stages
+   - **Activity**: the live agent transcript
+   - **Artifacts**: manifests, covers and card art as they're produced - click a card to regenerate it or give feedback
+5. **Steering** - type instructions into the box at the bottom ("make this card less dark", "the oasis distribution is wrong, use X"). The workbench resumes the job's Claude session with your message. When a builder is unsure, it asks - the job lands in **Needs your input** and your answer continues it.
+6. Jobs pause as **Awaiting review** before publishing. Inspect the gallery, then **Approve & publish** (submits to card0) or Discard.
+7. **Library** - published games with **Open in Card0** and on-demand **Localize 中文 / 日本語** jobs.
 
 ## What lives where
 
-- `~/Projects/card0/card0-workbench/` - workbench root
-  - `workbench.db` - SQLite (videos, jobs, events, games, settings)
-  - `jobs/<jobId>/` - per-job agent workspace (manifest, cards_raw/, compressed/, result.json)
+- `~/Projects/card0/card0-workbench/` - workbench root (override with `CARD0_WORKBENCH_ROOT`)
+  - `workbench.db` - SQLite (videos, jobs, events, artifacts, messages, games, settings)
+  - `jobs/<jobId>/` - per-job agent workspace (manifest, cards_raw/, compressed/, result.json, `.workbench/tasks.json` progress protocol)
 
 ## Requirements
 
 - `claude` CLI logged in (`claude login`) - the agent runs on your Claude subscription
-- `yt-dlp` on PATH (channel ingest)
+- `yt-dlp` on PATH (channel ingest + transcripts)
 - `card0` CLI logged in (`card0 login`) - game creation/upload/submit
 - The skills from `skills/` installed into `~/.claude/skills/` (agents load user-level skills):
 
@@ -46,5 +48,6 @@ npm run typecheck
 ## Notes
 
 - Jobs run with permissions bypassed by default (unattended automation needs full tool access). Toggle in Settings.
-- One job at a time in v1 - card0 uploads aren't parallel-safe.
+- Progress tracking uses a structured protocol: builders maintain `.workbench/tasks.json` in their workspace and the workbench mirrors it into the DB (phase, stages, artifacts, open questions). Stdout stage detection remains as a fallback.
+- Steering uses session resume (`claude --resume`): it applies between passes, not mid-run. Mid-run injection is future work.
 - A job that's `running` when the app quits becomes `interrupted`; Restart re-runs it in the same workspace (artifacts on disk are reused).
