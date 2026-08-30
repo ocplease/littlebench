@@ -51,6 +51,9 @@ export function getDb(): DatabaseSync {
   mkdirSync(path.dirname(dbPath()), { recursive: true })
   mkdirSync(path.join(workbenchRoot(), 'jobs'), { recursive: true })
   db = new DatabaseSync(dbPath())
+  // WAL: concurrent readers (GUI) never block on the writer (CLI job / agent events)
+  db.exec('PRAGMA journal_mode=WAL')
+  db.exec('PRAGMA busy_timeout=5000')
   migrate(db)
   return db
 }

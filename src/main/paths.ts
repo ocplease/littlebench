@@ -1,6 +1,5 @@
-import { app } from 'electron'
 import { execSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import path from 'node:path'
 
@@ -60,8 +59,12 @@ export function dbPath(): string {
 }
 
 /** Env for spawned agent processes. GUI apps launch without shell env,
- *  so merge the login shell's exported vars (PATH etc.) on top of ours. */
+ *  so merge the login shell's exported vars (PATH etc.) on top of ours.
+ *  Cached: zsh -i is slow, and it only needs to run once per process. */
+let cachedShellEnv: Record<string, string> | null = null
+
 export function shellEnv(): Record<string, string> {
+  if (cachedShellEnv) return cachedShellEnv
   const env = { ...process.env } as Record<string, string>
   try {
     const out = execSync(`/bin/zsh -ilc 'env' 2>/dev/null`, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })
@@ -79,12 +82,13 @@ export function shellEnv(): Record<string, string> {
   } catch {
     /* dev runs from a terminal already have env */
   }
+  cachedShellEnv = env
   return env
 }
 
 export function ensureDirs(): void {
   for (const dir of [workbenchRoot(), jobsRoot()]) {
-    if (!existsSync(dir)) require('node:fs').mkdirSync(dir, { recursive: true })
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
   }
 }
 

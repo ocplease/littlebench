@@ -66,7 +66,9 @@ export function detectStage(event: ClaudeStreamEvent): StageUpdate | null {
     if (input.includes('card0 game create')) return { stage: 'create', detail: 'Creating game on card0' }
     if (input.includes('card0 game submit')) return { stage: 'submit', detail: 'Submitting' }
     if (input.includes('image upload')) return { stage: 'upload', detail: 'Uploading images' }
-    if (/python3?.*(compress|PIL|Image)/.test(input)) return { stage: 'compress', detail: 'Compressing to JPEG' }
+    // OCR preprocessing also uses PIL, so require a compression-specific token
+    if (/python3?.*(compress|thumbnail|save\(.*JPEG|convert.*quality)/i.test(input))
+      return { stage: 'compress', detail: 'Compressing to JPEG' }
     return null
   }
   if (tool.name === 'WebFetch' && /youtube|youtu\.be/.test(input)) {

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync, readFileSync, readdirSync, mkdirSync } from 'node:fs'
+import { execSync } from 'node:child_process'
+import { existsSync, readFileSync, readdirSync, mkdirSync, statSync, writeFileSync, unlinkSync } from 'node:fs'
 import path from 'node:path'
 import { runAgent, AgentRun, ClaudeStreamEvent } from './agent-runner'
 import { detectStage } from './stages'
@@ -22,7 +23,64 @@ function emit(channel: string, payload: unknown): void {
   broadcast(channel, payload)
 }
 
+// ---------- cross-process run guard ----------
+// The GUI app and the CLI driver can be alive at the same time and share the
+// SQLite DB. A job writes its agent PID into the workspace so any process can
+// tell "running in another process" from "leftover from a crash".
+
+function lockPath(jobId: string): string {
+  return path.join(jobWorkspace(jobId), '.agent.pid')
+}
+
+function writeLock(jobId: string, pid: number): void {
+  try {
+    writeFileSync(lockPath(jobId), String(pid))
+  } catch { /* workspace might have been removed */ }
+}
+
+function clearLock(jobId: string): void {
+  try {
+    unlinkSync(lockPath(jobId))
+  } catch { /* already gone */ }
+}
+
+function pidIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (e) {
+    // EPERM means the process exists but is owned by someone else
+    return e instanceof Error && (e as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
+
+/** A job in 'running' state whose agent process is still alive (in this or another process). */
+export function jobIsLive(job: JobRow): boolean {
+  if (running.has(job.id)) return true
+  try {
+    const raw = readFileSync(lockPath(job.id), 'utf8').trim()
+    const pid = Number(raw)
+    return Number.isFinite(pid) && pid > 0 && pidIsAlive(pid)
+  } catch {
+    return false
+  }
+}
+
+function anyLiveRun(exceptJobId?: string): boolean {
+  return listJobs().some((j) => j.status === 'running' && j.id !== exceptJobId && jobIsLive(j))
+}
+
 // ---------- prompts ----------
+
+/** Backend constraint shared by all prompts: this model endpoint rejects image input. */
+const NO_IMAGE_INPUT = [
+  '- RUNTIME CONSTRAINT (critical): this backend REJECTS image input. NEVER use the Read tool on',
+  '  image files (.png/.jpg/.jpeg/.webp) or PDF files - the request fails with',
+  '  "400 Model only support text input" and the session dies. If a WebFetch result is a PDF,',
+  '  do not Read it - find a text source instead.',
+  '- Verify generated art via metadata ONLY: file counts, sizes (ls -la), dimensions via',
+  '  python3 PIL. A human reviews all art visually in the workbench gallery before submit.'
+].join('\n')
 
 export function buildGamePrompt(job: JobRow): string {
   const lines = [
@@ -38,7 +96,9 @@ export function buildGamePrompt(job: JobRow): string {
     '    "gameName": string, "cardCount": number, "uploadedCount": number,',
     '    "coverPath": string, "imperfections": string[], "notes": string }',
     '  (omit deckIds keys that do not apply to this game)',
-    '- Verify every generated image by reading it before uploading; regenerate individual bad images instead of whole batches.'
+    '- Use the byted-ark-seedream-skill for all image generation; save generated art under',
+    '  this workspace (cards_raw/ for PNGs, compressed/ for JPEGs).',
+    NO_IMAGE_INPUT
   ]
   return lines.join('\n')
 }
@@ -56,7 +116,7 @@ export function buildLocalizePrompt(parent: JobRow, language: 'zh-Hans' | 'ja'):
     '- Work inside the current directory (this is your job workspace).',
     '- CRITICAL: Do NOT run `card0 game submit`. A human reviews the cards first.',
     '- Write result.json in this directory with the same shape as the English job.',
-    `- Read every generated image to verify the ${langName} text is rendered correctly.`
+    NO_IMAGE_INPUT
   ].join('\n')
 }
 
@@ -68,6 +128,9 @@ export function createJob(input: {
   youtube_url?: string | null
   language?: string
   parent_job_id?: string | null
+  /** Start the agent immediately (GUI default). CLI `queue` passes false - a short-lived
+   *  process must not spawn an agent whose event handlers die with it. */
+  autostart?: boolean
 }): string {
   const id = `job_${Date.now().toString(36)}_${randomUUID().slice(0, 8)}`
   insertJob({
@@ -80,22 +143,31 @@ export function createJob(input: {
   })
   mkdirSync(jobWorkspace(id), { recursive: true })
   emit('jobs:changed', null)
-  pumpQueue()
+  if (input.autostart !== false) pumpQueue()
   return id
 }
 
 export function startJob(jobId: string): void {
   const job = getJob(jobId)
   if (!job || job.status === 'running' || running.has(jobId)) return
-  if (running.size > 0) return // v1: single agent at a time
-
-  const workspace = jobWorkspace(jobId)
-  mkdirSync(workspace, { recursive: true })
+  if (anyLiveRun()) return // v1: single agent across ALL processes
 
   const prompt =
     job.language === 'en'
       ? buildGamePrompt(job)
       : buildLocalizePrompt(getJob(job.parent_job_id!) ?? job, job.language as 'zh-Hans' | 'ja')
+
+  executeJobWithPrompt(jobId, prompt)
+}
+
+/** Run a job with an explicit prompt (used by startJob and the CLI driver). */
+export function executeJobWithPrompt(jobId: string, prompt: string): void {
+  const job = getJob(jobId)
+  if (!job || job.status === 'running' || running.has(jobId)) return
+  if (anyLiveRun(jobId)) return
+
+  const workspace = jobWorkspace(jobId)
+  mkdirSync(workspace, { recursive: true })
 
   const model = getSetting('model', '')
   const bypass = getSetting('bypassPermissions', 'true') === 'true'
@@ -110,10 +182,10 @@ export function startJob(jobId: string): void {
     bypassPermissions: bypass,
     sessionId: job.session_id ?? undefined,
     onEvent: (event) => {
-      // hook_started/hook_response system events are startup noise - skip entirely
-      if (event.type === 'system' && typeof event.subtype === 'string' && event.subtype.startsWith('hook_')) {
-        return
-      }
+      // Noise filter: thinking-token streams (thousands per job), hook chatter and
+      // tool progress are not worth persisting or shipping over IPC.
+      if (event.type === 'tool_progress') return
+      if (event.type === 'system' && event.subtype !== 'init') return
       seq++
       appendEvent(jobId, seq, event.type, event)
       emit('job:event', { jobId, event })
@@ -145,6 +217,7 @@ export function startJob(jobId: string): void {
     },
     onExit: (code) => {
       running.delete(jobId)
+      clearLock(jobId)
       const current = getJob(jobId)
       if (current && current.status === 'running') {
         // exited without a result event
@@ -161,6 +234,7 @@ export function startJob(jobId: string): void {
   })
 
   running.set(jobId, run)
+  writeLock(jobId, run.process.pid ?? -1)
   emit('jobs:changed', null)
 }
 
@@ -172,17 +246,7 @@ function finalizeJob(jobId: string, result: ClaudeStreamEvent): void {
     result_json: game ? JSON.stringify(game) : null,
     finished_at: new Date().toISOString()
   })
-  if (game?.gameId) {
-    upsertGame({
-      job_id: jobId,
-      language: getJob(jobId)?.language ?? 'en',
-      card0_game_id: game.gameId,
-      name: game.gameName ?? null,
-      cover_path: game.coverPath ? path.join(jobWorkspace(jobId), game.coverPath) : null,
-      card_count: game.cardCount ?? null,
-      status: 'awaiting_review'
-    })
-  }
+  recordGame(jobId, game)
   emit('jobs:changed', null)
 }
 
@@ -190,18 +254,21 @@ function finalizeJob(jobId: string, result: ClaudeStreamEvent): void {
 function finalizeFromDisk(jobId: string): void {
   const game = parseResultJson(jobId)
   updateJob(jobId, { status: 'awaiting_review', finished_at: new Date().toISOString() })
-  if (game?.gameId) {
-    upsertGame({
-      job_id: jobId,
-      language: getJob(jobId)?.language ?? 'en',
-      card0_game_id: game.gameId,
-      name: game.gameName ?? null,
-      cover_path: game.coverPath ? path.join(jobWorkspace(jobId), game.coverPath) : null,
-      card_count: game.cardCount ?? null,
-      status: 'awaiting_review'
-    })
-  }
+  recordGame(jobId, game)
   emit('jobs:changed', null)
+}
+
+function recordGame(jobId: string, game: JobResult | null): void {
+  if (!game?.gameId) return
+  upsertGame({
+    job_id: jobId,
+    language: getJob(jobId)?.language ?? 'en',
+    card0_game_id: game.gameId,
+    name: game.gameName ?? null,
+    cover_path: game.coverPath ? path.join(jobWorkspace(jobId), game.coverPath) : null,
+    card_count: game.cardCount ?? null,
+    status: 'awaiting_review'
+  })
 }
 
 interface JobResult {
@@ -228,6 +295,7 @@ export function parseResultJson(jobId: string): JobResult | null {
 export function stopJob(jobId: string): void {
   const run = running.get(jobId)
   if (run) run.kill()
+  clearLock(jobId)
   updateJob(jobId, { status: 'interrupted', finished_at: new Date().toISOString() })
   emit('jobs:changed', null)
   pumpQueue()
@@ -240,10 +308,11 @@ export function approveJob(jobId: string): { ok: boolean; error?: string } {
   const gameId = result?.gameId ?? job.card0_game_id
   if (!gameId) return { ok: false, error: 'no gameId found in result.json' }
   try {
-    const out = require('node:child_process').execSync(
-      `${CARD0_BIN} game submit --yes ${gameId}`,
-      { encoding: 'utf8', env: shellEnv(), timeout: 60_000 }
-    )
+    const out = execSync(`${CARD0_BIN} game submit --yes ${gameId}`, {
+      encoding: 'utf8',
+      env: shellEnv(),
+      timeout: 60_000
+    })
     updateJob(jobId, { status: 'submitted', finished_at: new Date().toISOString() })
     upsertGame({ job_id: jobId, language: job.language, card0_game_id: gameId, status: 'submitted', submitted_at: new Date().toISOString() })
     emit('jobs:changed', null)
@@ -257,29 +326,33 @@ export function approveJob(jobId: string): { ok: boolean; error?: string } {
 export function discardJob(jobId: string): void {
   const run = running.get(jobId)
   if (run) run.kill()
+  clearLock(jobId)
   updateJob(jobId, { status: 'discarded', finished_at: new Date().toISOString() })
   emit('jobs:changed', null)
   pumpQueue()
 }
 
 export function restartJob(jobId: string): void {
-  updateJob(jobId, { status: 'queued', error: null, stage: null, stage_detail: null, finished_at: null })
+  updateJob(jobId, {
+    status: 'queued', error: null, stage: null, stage_detail: null, finished_at: null,
+    session_id: null // fresh session; workspace artifacts on disk are reused
+  })
   emit('jobs:changed', null)
   pumpQueue()
 }
 
-/** Auto-advance: start the next queued job whenever nothing is running. */
+/** Auto-advance: start the next queued job whenever nothing is running anywhere. */
 export function pumpQueue(): void {
-  if (running.size > 0) return
+  if (running.size > 0 || anyLiveRun()) return
   if (getSetting('autoQueue', 'true') !== 'true') return
   const next = listJobs().find((j) => j.status === 'queued')
   if (next) startJob(next.id)
 }
 
-/** On app launch: any job left 'running' from a previous session is interrupted. */
+/** On app launch: a 'running' job with a dead agent PID is a crash leftover. */
 export function recoverInterrupted(): void {
   for (const job of listJobs()) {
-    if (job.status === 'running') {
+    if (job.status === 'running' && !jobIsLive(job)) {
       updateJob(job.id, { status: 'interrupted', finished_at: new Date().toISOString() })
     }
   }
@@ -314,7 +387,7 @@ export function listArtifacts(jobId: string): Array<{ rel: string; dir: string; 
 
 function statIsDir(p: string): boolean {
   try {
-    return require('node:fs').statSync(p).isDirectory()
+    return statSync(p).isDirectory()
   } catch {
     return false
   }
@@ -327,7 +400,7 @@ export function isRunning(jobId: string): boolean {
 /** Open a game in card0 (uses the card0 CLI). */
 export function openGame(gameId: string): { ok: boolean; error?: string } {
   try {
-    require('node:child_process').execSync(`${CARD0_BIN} game open ${gameId}`, {
+    execSync(`${CARD0_BIN} game open ${gameId}`, {
       env: shellEnv(),
       timeout: 30_000,
       stdio: 'ignore'
