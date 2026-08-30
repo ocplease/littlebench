@@ -148,6 +148,13 @@ function migrate(db: DatabaseSync): void {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_messages_job ON messages(job_id);
+
+    CREATE TABLE IF NOT EXISTS foreman_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `)
 
   // Additive column migrations for DBs created before the factory redesign.
@@ -409,4 +416,23 @@ export function listMessages(jobId: string): MessageRow[] {
   return getDb()
     .prepare('SELECT * FROM messages WHERE job_id = ? ORDER BY id ASC')
     .all(jobId) as unknown as MessageRow[]
+}
+
+// ---------- foreman chat ----------
+
+export interface ForemanMessageRow {
+  id: number
+  role: string
+  content: string
+  created_at: string
+}
+
+export function insertForemanMessage(role: string, content: string): void {
+  getDb().prepare('INSERT INTO foreman_messages (role, content) VALUES (?, ?)').run(role, content)
+}
+
+export function listForemanMessages(): ForemanMessageRow[] {
+  return getDb()
+    .prepare('SELECT * FROM foreman_messages ORDER BY id ASC')
+    .all() as unknown as ForemanMessageRow[]
 }

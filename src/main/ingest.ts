@@ -25,13 +25,14 @@ interface FlatEntry {
 export async function ingestChannel(channelUrl: string, max: number): Promise<{ added: number; total: number }> {
   const { stdout } = await execFileP(
     YTDLP_BIN,
-    ['--flat-playlist', '--playlist-items', `1:${max}`, '-J', channelUrl],
+    ['--flat-playlist', '--playlist-items', `1:${max}`, '-J', normalizeChannelUrl(channelUrl)],
     { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: shellEnv(), timeout: 300_000 }
   )
   const data = JSON.parse(stdout) as { title?: string; entries?: FlatEntry[]; channel?: string }
   const channelName = data.channel || data.title || channelUrl
   const entries = (data.entries ?? []).filter(
-    (e) => e.id && !/live|upcoming/i.test(e.live_status ?? '')
+    // real video ids are 11 chars; channel/playlist markers (UC...) are not videos
+    (e) => e.id && e.id.length === 11 && !/live|upcoming/i.test(e.live_status ?? '')
   )
 
   const videos = entries.map((e) => ({
@@ -54,6 +55,18 @@ function bestThumbnail(e: FlatEntry): string | null {
     thumbs.slice().sort((a, b) => (b.height ?? b.preference ?? 0) - (a.height ?? a.preference ?? 0))[0].url ??
     null
   )
+}
+
+/** A bare channel URL (@handle, /channel/ID, /c/..., /user/...) resolves to a
+ *  virtual "Shorts"-ish entry, not its uploads. Point it at the videos tab. */
+export function normalizeChannelUrl(url: string): string {
+  const u = url.trim()
+  if (
+    /^https?:\/\/(www\.|m\.)?youtube\.com\/(@[^/?#]+|channel\/[^/?#]+|c\/[^/?#]+|user\/[^/?#]+)\/?$/i.test(u)
+  ) {
+    return `${u.replace(/\/+$/, '')}/videos`
+  }
+  return u
 }
 
 /** Scout verdict: the Card0 Fit funnel (metadata-only cheap pass). */

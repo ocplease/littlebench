@@ -30,6 +30,8 @@ export interface AgentRunOptions {
   sessionId?: string
   /** Continue an existing session (steering) instead of starting fresh. */
   resumeSessionId?: string
+  /** Extra env for the spawned agent (PATH additions etc.). */
+  env?: Record<string, string>
   onEvent: (event: ClaudeStreamEvent) => void
   onStderr: (text: string) => void
   onExit: (code: number | null, signal: NodeJS.Signals | null) => void
@@ -64,7 +66,7 @@ export function runAgent(opts: AgentRunOptions): AgentRun {
 
   const proc = spawn(CLAUDE_BIN, args, {
     cwd: opts.cwd,
-    env: shellEnv(),
+    env: opts.env ? { ...shellEnv(), ...opts.env } : shellEnv(),
     stdio: ['ignore', 'pipe', 'pipe']
   })
 

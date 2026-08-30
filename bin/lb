@@ -1,0 +1,4 @@
+#!/bin/bash
+# littlebench CLI wrapper - agent/terminal entry point for factory operations.
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+exec "$DIR/node_modules/.bin/tsx" "$DIR/src/main/cli.ts" "$@"

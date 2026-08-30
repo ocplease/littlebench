@@ -47,6 +47,25 @@ export function workbenchRoot(): string {
   return process.env.CARD0_WORKBENCH_ROOT || path.join(homedir(), 'Projects/card0/card0-workbench')
 }
 
+/** Repo root (agent-works itself) - used to locate bin/lb for the foreman agent. */
+export function repoRoot(): string {
+  try {
+    if (typeof __dirname !== 'undefined') {
+      // CJS: src/main -> repo root
+      return path.resolve(__dirname, '../..')
+    }
+  } catch {
+    /* ESM below */
+  }
+  try {
+    // ESM (tsx): src/main -> repo root
+    const here = path.dirname(new URL(import.meta.url).pathname)
+    return path.resolve(here, '../..')
+  } catch {
+    return process.cwd()
+  }
+}
+
 export function jobsRoot(): string {
   return path.join(workbenchRoot(), 'jobs')
 }

@@ -38,6 +38,12 @@ const api: WorkbenchApi = {
 
   bootstrap: () => ipcRenderer.invoke('workbench:bootstrap'),
 
+  // foreman chat
+  foremanSend: (message) => ipcRenderer.invoke('foreman:send', message),
+  foremanMessages: () => ipcRenderer.invoke('foreman:messages'),
+  foremanBusy: () => ipcRenderer.invoke('foreman:busy'),
+  foremanReset: () => ipcRenderer.invoke('foreman:reset'),
+
   // live updates from main
   on: (channel, cb) => {
     const listener = (_e: Electron.IpcRendererEvent, payload: unknown) => cb(payload)

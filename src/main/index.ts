@@ -2,10 +2,11 @@ import { app, BrowserWindow, ipcMain } from 'electron'
 import path from 'node:path'
 import { readFileSync, existsSync } from 'node:fs'
 import { ensureDirs, jobWorkspace } from './paths'
-import { getDb, getSetting, setSetting, listVideos, listJobs, getJob, listGames, listArtifactsByJob, listMessages } from './db'
+import { getDb, getSetting, setSetting, listVideos, listJobs, getJob, listGames, listArtifactsByJob, listMessages, listForemanMessages } from './db'
 import { setBroadcast, createJob, startJob, stopJob, approveJob, discardJob, restartJob, steerJob, jobEventsFromDb, listArtifacts, recoverInterrupted, pumpQueue, openGame, jobIsLive } from './jobs'
 import { ingestChannel, scoutVideos, deepScoutVideo } from './ingest'
 import { updateVideoStatus, updateVideoScout } from './db'
+import { setForemanBroadcast, sendForeman, foremanBusy, resetForeman } from './foreman'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -64,7 +65,13 @@ function registerIpc(): void {
   )
   handle('ingest:channel', async (url: string, max?: number) => {
     const m = max ?? Number(getSetting('maxVideos', '50'))
-    return await ingestChannel(url, m)
+    const res = await ingestChannel(url, m)
+    // auto-scout: paste a channel, see candidates - never a silent empty board
+    const fresh = listVideos().filter((v) => v.status === 'new').map((v) => v.id)
+    if (fresh.length) {
+      void scoutVideos(fresh, (id) => broadcast('videos:changed', { id }))
+    }
+    return res
   })
   handle('triage:run', async (videoIds: number[]) => {
     void scoutVideos(videoIds, (id, status, verdict) => {
@@ -172,6 +179,13 @@ function registerIpc(): void {
     pumpQueue()
     return true
   })
+
+  // ---------- foreman chat ----------
+
+  handle('foreman:send', (message: string) => sendForeman(message))
+  handle('foreman:messages', () => listForemanMessages())
+  handle('foreman:busy', () => foremanBusy())
+  handle('foreman:reset', () => resetForeman())
 }
 
 // ---------- lifecycle ----------
@@ -180,8 +194,13 @@ app.whenReady().then(() => {
   ensureDirs()
   getDb()
   setBroadcast(broadcast)
+  setForemanBroadcast(broadcast)
   registerIpc()
   createWindow()
+
+  // Pick up jobs queued by other processes (foreman / CLI) even though they
+  // never emit into this process's event bus.
+  setInterval(() => pumpQueue(), 15_000).unref()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

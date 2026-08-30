@@ -15,7 +15,8 @@ npm run typecheck
 
 ## How to use
 
-1. **Sources** - paste a YouTube channel URL and hit **Add channel**. **Scout new videos** runs the cheap pass (metadata-only classification + Card0 Fit score + rights status). **Deep scout** fetches transcripts for shortlisted videos and refines the score.
+0. **Chat** - talk to the foreman. This is the main entrance: paste a YouTube channel URL ("here's a card game channel: ..."), ask what the factory is doing, tell it to queue the best candidates. The foreman runs a Claude session restricted to the `lb` CLI (see below) - it can ingest, scout, queue jobs and report status, but never publishes on its own. It keeps one conversation, so follow-ups ("queue the top 3", "what about that failed job?") work naturally.
+1. **Sources** - paste a YouTube channel URL and hit **Add channel** (ingest auto-scouts new videos). **Deep scout** fetches transcripts for shortlisted videos and refines the score.
 2. Select candidates (or hit **Build game** on a card) - each becomes a job on the **Factory** board.
 3. **Factory** - the board: Candidates / Queued / Building / Review / Published. Up to 3 builder workers run concurrently (worker dots in the header). Click any card to open its workspace.
 4. **Game Workspace** - three columns:
@@ -48,6 +49,7 @@ npm run typecheck
 ## Notes
 
 - Jobs run with permissions bypassed by default (unattended automation needs full tool access). Toggle in Settings.
+- The foreman is deliberately narrower: its Bash is limited to `lb *` and it runs without bypass. `bin/lb` wraps the workbench CLI (`ingest`, `scout`, `videos`, `queue`, `status`, `events`), so the chat can drive the factory without touching anything else on your machine.
 - Progress tracking uses a structured protocol: builders maintain `.workbench/tasks.json` in their workspace and the workbench mirrors it into the DB (phase, stages, artifacts, open questions). Stdout stage detection remains as a fallback.
 - Steering uses session resume (`claude --resume`): it applies between passes, not mid-run. Mid-run injection is future work.
 - A job that's `running` when the app quits becomes `interrupted`; Restart re-runs it in the same workspace (artifacts on disk are reused).

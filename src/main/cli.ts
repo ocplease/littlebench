@@ -1,19 +1,26 @@
 /**
- * Headless driver for the workbench - create and run jobs without the GUI.
+ * Headless driver for the workbench - operate the factory without the GUI.
  * Shares the SQLite DB and job workspaces with the Electron app.
+ * This is also the agent-facing control surface: the foreman (chat agent)
+ * runs these commands via Bash.
  *
- * Usage:
- *   npx tsx src/main/cli.ts queue <youtube-url> "<title>"
- *   npx tsx src/main/cli.ts run <jobId>          # runs in foreground, tails events
- *   npx tsx src/main/cli.ts dry-run <youtube-url> "<title>"   # cheap plumbing test
- *   npx tsx src/main/cli.ts events <jobId>       # dump persisted events
- *   npx tsx src/main/cli.ts list
+ * Usage (or use the bin/lb wrapper):
+ *   lb ingest <channelUrl> [max]        # list a channel's videos into the factory
+ *   lb scout --new | lb scout <id>...   # classify + Card0-fit-score videos
+ *   lb videos [status]                  # list videos with fit/classification
+ *   lb queue <videoId>...               # queue videos as game-builder jobs
+ *   lb queue --candidates [--min-fit N] # queue everything above a fit bar
+ *   lb status                           # jobs + games overview
+ *   lb run <jobId>                      # run a job in the foreground
+ *   lb events <jobId>                   # dump persisted events
+ *   lb list
  */
 import { ensureDirs } from './paths'
-import { getDb, getJob, listJobs } from './db'
+import { getDb, getJob, listJobs, listVideos, updateVideoStatus, VideoRow } from './db'
 import {
   createJob, startJob, executeJobWithPrompt, jobEventsFromDb, recoverInterrupted, jobIsLive
 } from './jobs'
+import { ingestChannel, scoutVideos } from './ingest'
 
 const TERMINAL = new Set(['awaiting_review', 'submitted', 'failed', 'interrupted', 'discarded'])
 
@@ -63,9 +70,81 @@ async function main(): Promise<void> {
   recoverInterrupted()
 
   switch (cmd) {
+    case 'ingest': {
+      const [url, maxArg] = rest
+      if (!url) throw new Error('usage: ingest <channelUrl> [max]')
+      const max = Math.max(1, Number(maxArg) || 50)
+      const res = await ingestChannel(url, max)
+      console.log(`channel listed ${res.total} videos, ${res.added} new`)
+      for (const v of listVideos().slice(0, res.added)) {
+        console.log(`  ${v.id}  ${v.title}`)
+      }
+      return
+    }
+    case 'scout': {
+      const ids = rest[0] === '--new'
+        ? listVideos().filter((v) => v.status === 'new').map((v) => v.id)
+        : rest.map(Number).filter(Number.isFinite)
+      if (!ids.length) throw new Error('usage: scout --new | scout <videoId>...')
+      await scoutVideos(ids, () => {})
+      for (const id of ids) {
+        const v = listVideos().find((x) => x.id === id)
+        if (v) printVideo(v)
+      }
+      return
+    }
+    case 'videos': {
+      const [status] = rest
+      for (const v of listVideos()) {
+        if (status && v.status !== status) continue
+        printVideo(v)
+      }
+      return
+    }
     case 'queue': {
+      if (rest[0] === '--candidates') {
+        const minFit = rest.includes('--min-fit') ? Number(rest[rest.indexOf('--min-fit') + 1]) || 0 : 0
+        const picks = listVideos().filter(
+          (v) => v.status === 'candidate' && (v.fit_score ?? 0) >= minFit
+        )
+        for (const v of picks) {
+          createJob({ video_id: v.id, title: v.title, youtube_url: v.url, autostart: false })
+          updateVideoStatus(v.id, 'queued', null)
+          console.log(`queued ${v.id}  ${v.title}`)
+        }
+        if (!picks.length) console.log('no candidates above the bar')
+        return
+      }
+      const ids = rest.map(Number).filter(Number.isFinite)
+      if (!ids.length) throw new Error('usage: queue <videoId>... | queue --candidates [--min-fit N]')
+      for (const id of ids) {
+        const v = listVideos().find((x) => x.id === id)
+        if (!v) {
+          console.log(`unknown video ${id}`)
+          continue
+        }
+        createJob({ video_id: v.id, title: v.title, youtube_url: v.url, autostart: false })
+        updateVideoStatus(v.id, 'queued', null)
+        console.log(`queued ${v.id}  ${v.title}`)
+      }
+      return
+    }
+    case 'status': {
+      const jobs = listJobs()
+      const byStatus = new Map<string, number>()
+      for (const j of jobs) byStatus.set(j.status, (byStatus.get(j.status) ?? 0) + 1)
+      const videoStatus: Record<string, number> = {}
+      for (const v of listVideos()) videoStatus[v.status] = (videoStatus[v.status] ?? 0) + 1
+      console.log('videos:', JSON.stringify(videoStatus))
+      console.log('jobs:', JSON.stringify(Object.fromEntries(byStatus)))
+      for (const j of jobs.slice(0, 12)) {
+        console.log(`  ${j.id}  ${j.status.padEnd(16)} ${j.title.slice(0, 60)}`)
+      }
+      return
+    }
+    case 'queue-url': {
       const [url, ...titleParts] = rest
-      if (!url) throw new Error('usage: queue <youtube-url> "<title>"')
+      if (!url) throw new Error('usage: queue-url <youtube-url> "<title>"')
       const title = titleParts.join(' ') || url
       const id = createJob({ title, youtube_url: url, autostart: false })
       console.log(id)
@@ -126,8 +205,19 @@ async function main(): Promise<void> {
       return
     }
     default:
-      console.log('commands: queue | run | dry-run | events | list')
+      console.log(
+        'commands: ingest | scout | videos | queue | queue-url | status | run | dry-run | events | list'
+      )
   }
+}
+
+function printVideo(v: VideoRow): void {
+  const fit = v.fit_score != null ? String(v.fit_score).padStart(3) : '  -'
+  const cls = (v.classification ?? '-').padEnd(14)
+  const rights = (v.rights_status ?? '-').padEnd(16)
+  console.log(
+    `${String(v.id).padStart(4)}  fit ${fit}  ${cls} ${rights} ${v.status.padEnd(10)} ${v.title.slice(0, 64)}`
+  )
 }
 
 main().catch((e) => {

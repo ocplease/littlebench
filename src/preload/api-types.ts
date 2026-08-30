@@ -98,6 +98,13 @@ export interface ApproveResult {
   error?: string
 }
 
+export interface ForemanMessage {
+  id: number
+  role: string
+  content: string
+  created_at: string
+}
+
 export interface WorkbenchApi {
   getSettings(): Promise<Settings>
   setSettings(s: Record<string, string>): Promise<boolean>
@@ -130,5 +137,12 @@ export interface WorkbenchApi {
   readTextArtifact(jobId: string, rel: string): Promise<string | null>
 
   bootstrap(): Promise<boolean>
+
+  // foreman chat
+  foremanSend(message: string): Promise<ApproveResult>
+  foremanMessages(): Promise<ForemanMessage[]>
+  foremanBusy(): Promise<boolean>
+  foremanReset(): Promise<void>
+
   on(channel: string, cb: (payload: unknown) => void): () => void
 }

@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
+import Chat from './views/Chat'
 import Factory from './views/Factory'
 import Workspace from './views/Workspace'
 import Sources from './views/Sources'
@@ -6,10 +7,10 @@ import Library from './views/Library'
 import SettingsView from './views/Settings'
 import type { Job, Video, Game } from './types'
 
-type View = 'factory' | 'sources' | 'library' | 'settings'
+type View = 'chat' | 'factory' | 'sources' | 'library' | 'settings'
 
 export default function App() {
-  const [view, setView] = useState<View>('factory')
+  const [view, setView] = useState<View>('chat')
   const [jobs, setJobs] = useState<Job[]>([])
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null)
   const [videos, setVideos] = useState<Video[]>([])
@@ -69,6 +70,9 @@ export default function App() {
           <span className="brand-dot" /> littlebench
         </div>
         <nav>
+          <button className={view === 'chat' ? 'active' : ''} onClick={() => setView('chat')}>
+            Chat
+          </button>
           <button className={view === 'factory' ? 'active' : ''} onClick={() => setView('factory')}>
             Factory
             <span className="count">
@@ -107,6 +111,7 @@ export default function App() {
       </aside>
 
       <main className="main">
+        {view === 'chat' && <Chat />}
         {view === 'factory' && (
           <Factory
             jobs={jobs}
