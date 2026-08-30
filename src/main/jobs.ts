@@ -265,10 +265,23 @@ function recordGame(jobId: string, game: JobResult | null): void {
     language: getJob(jobId)?.language ?? 'en',
     card0_game_id: game.gameId,
     name: game.gameName ?? null,
-    cover_path: game.coverPath ? path.join(jobWorkspace(jobId), game.coverPath) : null,
+    cover_path: resolveWorkspacePath(jobId, game.coverPath),
     card_count: game.cardCount ?? null,
     status: 'awaiting_review'
   })
+}
+
+/** Agents may write coverPath as relative (compressed/cover.jpg) or absolute
+ *  (possibly against a relocated workbench root). Normalize to a real path
+ *  inside this workspace, falling back to a compressed/ basename match. */
+function resolveWorkspacePath(jobId: string, p?: string): string | null {
+  if (!p) return null
+  const ws = jobWorkspace(jobId)
+  const candidates = path.isAbsolute(p) ? [p, path.join(ws, path.basename(p))] : [path.join(ws, p)]
+  for (const c of candidates) {
+    if (existsSync(c) && c.startsWith(ws + path.sep)) return c
+  }
+  return null
 }
 
 interface JobResult {
