@@ -1,0 +1,154 @@
+import { app, BrowserWindow, ipcMain } from 'electron'
+import path from 'node:path'
+import { readFileSync, existsSync } from 'node:fs'
+import { ensureDirs, jobWorkspace } from './paths'
+import { getDb, getSetting, setSetting, listVideos, listJobs, getJob, listGames } from './db'
+import { setBroadcast, createJob, startJob, stopJob, approveJob, discardJob, restartJob, jobEventsFromDb, listArtifacts, recoverInterrupted, pumpQueue, openGame } from './jobs'
+import { ingestChannel, triageVideos } from './ingest'
+import { updateVideoStatus } from './db'
+
+let mainWindow: BrowserWindow | null = null
+
+function broadcast(channel: string, payload: unknown): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(channel, payload)
+  }
+}
+
+function createWindow(): void {
+  mainWindow = new BrowserWindow({
+    width: 1400,
+    height: 900,
+    minWidth: 1000,
+    minHeight: 640,
+    title: 'card0 workbench',
+    backgroundColor: '#0d1117',
+    webPreferences: {
+      preload: path.join(__dirname, '../preload/index.js'),
+      sandbox: false,
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  })
+
+  if (process.env.ELECTRON_RENDERER_URL) {
+    mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
+  } else {
+    mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'))
+  }
+}
+
+// ---------- IPC handlers ----------
+
+function handle(channel: string, fn: (...args: any[]) => any): void {
+  ipcMain.handle(channel, (_e, ...args) => fn(...args))
+}
+
+function registerIpc(): void {
+  handle('settings:get', () => ({
+    model: getSetting('model', ''),
+    triageModel: getSetting('triageModel', 'haiku'),
+    autoQueue: getSetting('autoQueue', 'true'),
+    bypassPermissions: getSetting('bypassPermissions', 'true'),
+    maxVideos: getSetting('maxVideos', '50')
+  }))
+  handle('settings:set', (s: Record<string, string>) => {
+    for (const [k, v] of Object.entries(s)) setSetting(k, v)
+    return true
+  })
+
+  handle('videos:list', () => listVideos())
+  handle('videos:setStatus', (id: number, status: string, reason: string | null) =>
+    updateVideoStatus(id, status as never, reason)
+  )
+  handle('ingest:channel', async (url: string, max?: number) => {
+    const m = max ?? Number(getSetting('maxVideos', '50'))
+    return await ingestChannel(url, m)
+  })
+  handle('triage:run', async (videoIds: number[]) => {
+    void triageVideos(videoIds, (id, status, reason) => {
+      broadcast('videos:changed', { id, status, reason })
+    })
+    return true // runs async; UI gets updates via videos:changed
+  })
+
+  handle('jobs:list', () => listJobs())
+  handle('jobs:get', (id: string) => getJob(id))
+  handle('jobs:create', (input: { video_id?: number; title: string; youtube_url?: string }) =>
+    createJob(input)
+  )
+  handle('jobs:queueSelected', (videos: Array<{ id: number; title: string; url: string }>) => {
+    const ids: string[] = []
+    for (const v of videos) {
+      ids.push(createJob({ video_id: v.id, title: v.title, youtube_url: v.url }))
+    }
+    return ids
+  })
+  handle('jobs:start', (id: string) => {
+    startJob(id)
+    return true
+  })
+  handle('jobs:stop', (id: string) => {
+    stopJob(id)
+    return true
+  })
+  handle('jobs:approve', (id: string) => approveJob(id))
+  handle('jobs:discard', (id: string) => {
+    discardJob(id)
+    return true
+  })
+  handle('jobs:restart', (id: string) => {
+    restartJob(id)
+    return true
+  })
+  handle('jobs:events', (id: string) => jobEventsFromDb(id))
+  handle('jobs:localize', (jobId: string, language: string) => {
+    const parent = getJob(jobId)
+    if (!parent) return null
+    return createJob({
+      title: `${parent.title} (${language})`,
+      youtube_url: parent.youtube_url,
+      language,
+      parent_job_id: parent.id
+    })
+  })
+
+  handle('games:list', () => listGames())
+  handle('games:open', (gameId: string) => openGame(gameId))
+
+  handle('artifacts:list', (jobId: string) => listArtifacts(jobId))
+  handle('artifacts:read', (jobId: string, rel: string) => {
+    // only serve files inside the job workspace
+    const root = jobWorkspace(jobId)
+    const full = path.resolve(root, rel)
+    if (!full.startsWith(root) || !existsSync(full)) return null
+    const ext = path.extname(full).toLowerCase()
+    const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg'
+    const data = readFileSync(full)
+    return `data:${mime};base64,${data.toString('base64')}`
+  })
+
+  handle('workbench:bootstrap', () => {
+    recoverInterrupted()
+    pumpQueue()
+    return true
+  })
+}
+
+// ---------- lifecycle ----------
+
+app.whenReady().then(() => {
+  ensureDirs()
+  getDb()
+  setBroadcast(broadcast)
+  registerIpc()
+  createWindow()
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  })
+})
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit()
+})
