@@ -3,7 +3,7 @@ import path from 'node:path'
 import { readFileSync, existsSync } from 'node:fs'
 import { ensureDirs, jobWorkspace } from './paths'
 import { getDb, getSetting, setSetting, listVideos, listJobs, getJob, listGames, listArtifactsByJob, listMessages, listForemanMessages } from './db'
-import { setBroadcast, createJob, startJob, stopJob, approveJob, discardJob, restartJob, steerJob, jobEventsFromDb, listArtifacts, recoverInterrupted, pumpQueue, openGame, jobIsLive } from './jobs'
+import { setBroadcast, setShuttingDown, createJob, startJob, stopJob, approveJob, discardJob, restartJob, steerJob, jobEventsFromDb, listArtifacts, recoverInterrupted, pumpQueue, openGame, jobIsLive } from './jobs'
 import { ingestChannel, scoutVideos, deepScoutVideo } from './ingest'
 import { updateVideoStatus, updateVideoScout } from './db'
 import { setForemanBroadcast, sendForeman, foremanBusy, resetForeman } from './foreman'
@@ -209,4 +209,12 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
+})
+
+// Stop the job machinery before the process goes away: agents get marked
+// interrupted instead of failed, and nothing new is spawned into the void.
+app.on('before-quit', () => setShuttingDown())
+process.on('SIGTERM', () => {
+  setShuttingDown()
+  app.quit()
 })

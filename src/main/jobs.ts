@@ -19,6 +19,14 @@ export function setBroadcast(fn: Broadcast): void {
   broadcast = fn
 }
 
+/** Set during app shutdown: job exit handlers mark agents interrupted
+ *  instead of failed, and pumpQueue stops spawning replacements that would
+ *  instantly become orphans of the dying process. */
+let shuttingDown = false
+export function setShuttingDown(): void {
+  shuttingDown = true
+}
+
 const running = new Map<string, AgentRun>()
 
 function emit(channel: string, payload: unknown): void {
@@ -251,17 +259,21 @@ export function executeJobWithPrompt(
       clearLock(jobId)
       pollProtocol() // catch a final write the stream events didn't cover
       const current = getJob(jobId)
+      // 143 = SIGTERM, 130 = SIGINT: the workbench (or the OS) stopped the
+      // agent, it didn't fail on its own. stopJob already set its own status,
+      // so reaching here with one of those codes means an external kill.
+      const interrupted = shuttingDown || code === 143 || code === 130
       if (current && current.status === 'running') {
         // exited without a result event
         updateJob(jobId, {
-          status: code === 0 ? 'awaiting_review' : 'failed',
-          error: code === 0 ? null : `agent exited with code ${code}`,
+          status: code === 0 ? 'awaiting_review' : interrupted ? 'interrupted' : 'failed',
+          error: code === 0 || interrupted ? null : `agent exited with code ${code}`,
           finished_at: new Date().toISOString()
         })
         if (code === 0) finalizeFromDisk(jobId)
       }
       emit('jobs:changed', null)
-      pumpQueue()
+      if (!shuttingDown) pumpQueue()
     }
   })
 
@@ -435,6 +447,7 @@ export function steerJob(jobId: string, message: string, artifactPath?: string |
 
 /** Auto-advance: keep up to maxWorkers agents running. */
 export function pumpQueue(): void {
+  if (shuttingDown) return // never spawn agents from a dying process
   if (getSetting('autoQueue', 'true') !== 'true') return
   const slots = maxWorkers() - liveRunCount()
   if (slots <= 0) return
