@@ -1,7 +1,9 @@
 import { spawn, ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
+import { mkdirSync, writeFileSync, unlinkSync } from 'node:fs'
+import path from 'node:path'
 import readline from 'node:readline'
-import { CLAUDE_BIN, shellEnv } from './paths'
+import { CLAUDE_BIN, shellEnv, workbenchRoot } from './paths'
 
 /** A single line from `claude -p --output-format stream-json`. */
 export interface ClaudeStreamEvent {
@@ -57,6 +59,20 @@ export function runAgent(opts: AgentRunOptions): AgentRun {
     args.push('--session-id', sessionId)
   }
   if (opts.model) args.push('--model', opts.model)
+
+  // ~/.claude/settings.json `env` OVERRIDES the spawn environment, so a rotated
+  // pool key passed via env vars never actually reaches the CLI - every agent
+  // silently ran on the settings.json key. A --settings file outranks user
+  // settings, which is the only reliable per-spawn key override.
+  let settingsFile: string | null = null
+  const rotatedKey = opts.env?.ANTHROPIC_AUTH_TOKEN
+  if (rotatedKey) {
+    const dir = path.join(workbenchRoot(), 'run-settings')
+    mkdirSync(dir, { recursive: true })
+    settingsFile = path.join(dir, `${sessionId}.json`)
+    writeFileSync(settingsFile, JSON.stringify({ env: { ANTHROPIC_AUTH_TOKEN: rotatedKey } }))
+    args.push('--settings', settingsFile)
+  }
   if (opts.bypassPermissions) {
     args.push('--dangerously-skip-permissions')
   } else {
@@ -90,7 +106,12 @@ export function runAgent(opts: AgentRunOptions): AgentRun {
   })
 
   proc.on('error', (err) => opts.onStderr(`spawn error: ${err.message}`))
-  proc.on('exit', (code, signal) => opts.onExit(code, signal))
+  proc.on('exit', (code, signal) => {
+    if (settingsFile) {
+      try { unlinkSync(settingsFile) } catch { /* already gone */ }
+    }
+    opts.onExit(code, signal)
+  })
 
   return {
     process: proc,
