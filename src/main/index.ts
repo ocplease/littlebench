@@ -53,7 +53,10 @@ function registerIpc(): void {
     bypassPermissions: getSetting('bypassPermissions', 'true'),
     maxVideos: getSetting('maxVideos', '50'),
     maxWorkers: getSetting('maxWorkers', '3'),
-    quotaUntil: getSetting('quota_until', '')
+    quotaUntil: getSetting('quota_until', ''),
+    autoLocalize: getSetting('autoLocalize', 'true'),
+    claudeApiKeys: getSetting('claude_api_keys', ''),
+    imageApiKeys: getSetting('image_api_keys', '')
   }))
   handle('settings:set', (s: Record<string, string>) => {
     for (const [k, v] of Object.entries(s)) setSetting(k, v)

@@ -957,3 +957,12 @@ input[type='checkbox'] { transform: scale(1.2); }
   background: rgba(227, 179, 65, 0.12); border: 1px solid rgba(227, 179, 65, 0.4);
   color: #e3b341;
 }
+
+.setting-row.column { flex-direction: column; align-items: stretch; gap: 6px; }
+.setting-row.column label { display: flex; flex-direction: column; gap: 3px; }
+.key-input {
+  font: inherit; font-size: 12px; font-family: ui-monospace, monospace;
+  padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--bg); color: var(--text); resize: vertical; min-width: 320px;
+}
+.key-input:focus { outline: none; border-color: var(--accent); }

@@ -86,6 +86,16 @@ Group card faces by:
 
 List the unique designs in `cards_plan.json` with: `id`, `value`, `name_en`, `name_zh`, `name_ja`, `ability_xx`, `color_theme`. This is your source of truth for prompts.
 
+### Card back - reuse first, generate only if necessary
+
+Every card also needs a **back** image (card0 takes it per card via `--face back`). Backs must be **textless and language-neutral** - an ornamental pattern, frame, or emblem, never title text - so one back serves every language version and every game with a similar theme. This is a deliberate token saver: image generation is the expensive stage.
+
+1. **Check the shared back library first.** The workbench prompt gives you its path (default: `<workbench-root>/assets/card-backs/`). Files are named by theme, e.g. `back_desert_arabesque.jpg`, `back_fantasy_ornate.jpg`.
+2. **If a back fits the game's theme, reuse it**: copy it into your workspace as `card_back.jpg` and skip generation entirely.
+3. **Only if nothing fits** (empty library, or every back clashes with the theme): generate ONE back with Seedream - square, matching the game's art style and palette, strictly textless. Compress it (Stage 7) to `card_back.jpg`, **and also copy it into the library** with a descriptive name (`cp card_back.jpg <library>/back_<theme>.jpg`) so future games reuse it instead of generating.
+
+For localized builds (Stage 9), always reuse the parent game's `card_back.jpg` or the library - backs are language-neutral, so localization never generates a new back.
+
 ## Stage 6 — Generate card art in batches
 
 Use Seedream with `sequential: true, count: N` for batches of up to 15 cards. One prompt must describe every card in the batch — Seedream's "coherent set" mode only works if you say "X cards in a coherent set" and describe each.
@@ -162,7 +172,13 @@ card0 card image upload --face front --mode full_face <cardId> compressed/<file>
 
 `--mode full_face` is the right default for full-card designs. Use `--mode artwork` only if you're sending an isolated illustration that card0 should compose with its built-in frame.
 
-Run uploads in batches per deck (typically 5-15 uploads each) and capture timing. card0's image upload takes ~2-5s per card; budget at least 60s per 15-card deck.
+After the fronts, upload the back to **every** card - it is the same `card_back.jpg` file for all of them:
+
+```bash
+card0 card image upload --face back --mode full_face <cardId> card_back.jpg
+```
+
+Run uploads in batches per deck (typically 5-15 uploads each) and capture timing. card0's image upload takes ~2-5s per card; budget at least 60s per 15-card deck (fronts + backs ≈ double that).
 
 ## Stage 9 - Build additional languages (or all three at once)
 
@@ -210,6 +226,8 @@ Done. Report the game IDs, the cover URL, and a summary of what was generated an
 - `DECK_REQUIRED` after a `cd` — card0's CLI state is per-shell; always re-run `card0 game use` and `card0 deck use` after a directory change or new shell.
 - Seedream returns only 1 image for a batch — your prompt didn't say "X cards in a coherent set". Rewrite the prompt.
 - Seedream swaps the order of cards — the model often reorders. Verify each generated image against `cards_plan.json` before assuming the index matches the prompt.
+- Generated back image contains text — it was supposed to be textless. A back with rendered
+  text cannot be reused across languages; regenerate or pick a different one from the library.
 - Card text on the image has typos — accept it for the in-game metadata is in the description, but mention the imperfection in the final report. Regenerating rarely fixes the same character.
 - `card0 game use --id` fails with "unknown option" — use positional `card0 game use <gameId>`, not the `--id` flag.
 - `card0 deck list` throws a SyntaxError in browser.js — pass `--game <gameId>` instead of relying on the active game context.

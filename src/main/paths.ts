@@ -74,6 +74,11 @@ export function jobWorkspace(jobId: string): string {
   return path.join(jobsRoot(), jobId)
 }
 
+/** Shared card-back library: textless backs reused across games (token saver). */
+export function backLibraryDir(): string {
+  return path.join(workbenchRoot(), 'assets', 'card-backs')
+}
+
 export function dbPath(): string {
   return path.join(workbenchRoot(), 'workbench.db')
 }
@@ -107,7 +112,7 @@ export function shellEnv(): Record<string, string> {
 }
 
 export function ensureDirs(): void {
-  for (const dir of [workbenchRoot(), jobsRoot()]) {
+  for (const dir of [workbenchRoot(), jobsRoot(), backLibraryDir()]) {
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
   }
 }

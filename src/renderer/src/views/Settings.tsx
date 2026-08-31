@@ -73,6 +73,52 @@ export default function SettingsView() {
           placeholder="3"
         />
       </div>
+      <div className="setting-row">
+        <label>
+          Auto-localize every game
+          <span className="muted small">queue zh-Hans + ja builds when the English game lands in review</span>
+        </label>
+        <input
+          type="checkbox"
+          checked={s.autoLocalize === 'true'}
+          onChange={(e) => setS({ ...s, autoLocalize: e.target.checked ? 'true' : 'false' })}
+        />
+      </div>
+      <div className="setting-row column">
+        <label>
+          Claude API keys
+          <span className="muted small">
+            one per line - builders and the foreman rotate through them so one 5h quota window
+            doesn't stall the factory. A key that hits 429 is skipped until its window resets.
+            Leave empty to use your default login. Stored only in the local workbench DB.
+          </span>
+        </label>
+        <textarea
+          rows={3}
+          className="key-input"
+          spellCheck={false}
+          value={s.claudeApiKeys}
+          onChange={(e) => setS({ ...s, claudeApiKeys: e.target.value })}
+          placeholder={'ark-…\nark-…'}
+        />
+      </div>
+      <div className="setting-row column">
+        <label>
+          Image generation API keys
+          <span className="muted small">
+            one per line - Seedream art generation rotates through these independently of the
+            claude keys. Leave empty to reuse the claude key / default login.
+          </span>
+        </label>
+        <textarea
+          rows={3}
+          className="key-input"
+          spellCheck={false}
+          value={s.imageApiKeys}
+          onChange={(e) => setS({ ...s, imageApiKeys: e.target.value })}
+          placeholder={'ark-…\nark-…'}
+        />
+      </div>
       <button className="primary" onClick={save}>
         {saved ? 'Saved ✓' : 'Save'}
       </button>

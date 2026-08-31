@@ -286,7 +286,16 @@ function smartScanForArkKey() {
  */
 function autoDetectApiKey() {
   const platform = detectPlatform();
-  
+
+  // 优先级 1 (最高): 工作台注入的专用图片生成 Key（轮换池）
+  // 让图片生成与 LLM 调用可以分别使用不同的 Key，避免一起打满 5 小时额度
+  if (process.env.SEEDREAM_API_KEY) {
+    const seedreamValidation = validateArkKey(process.env.SEEDREAM_API_KEY);
+    if (seedreamValidation.valid) {
+      return { key: seedreamValidation.trimmed, source: 'env-seedream', found: true };
+    }
+  }
+
   // 优先级 2: 根据当前平台读取对应配置
   if (platform === 'claude-code') {
     // 1. 先读环境变量（会话级，优先级最高）

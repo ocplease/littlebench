@@ -87,6 +87,9 @@ export interface Settings {
   maxVideos: string
   maxWorkers: string
   quotaUntil: string
+  autoLocalize: string
+  claudeApiKeys: string
+  imageApiKeys: string
 }
 
 export interface IngestResult {

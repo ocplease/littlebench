@@ -26,12 +26,16 @@ npm run typecheck
 5. **Steering** - type instructions into the box at the bottom ("make this card less dark", "the oasis distribution is wrong, use X"). The workbench resumes the job's Claude session with your message. When a builder is unsure, it asks - the job lands in **Needs your input** and your answer continues it.
 6. Jobs pause as **Awaiting review** before publishing. Inspect the gallery, then **Approve & publish** (submits to card0) or Discard.
 7. **Library** - published games with **Open in Card0** and on-demand **Localize 中文 / 日本語** jobs.
+8. **Three languages per game** - when an English build lands in review, the workbench automatically queues zh-Hans and ja localization jobs (full re-builds with localized art, per the skill's Stage 9). Discarding the English game cancels its queued localizations. Toggle in Settings.
+9. **Card backs** - every card gets a back (`card0 --face back`). Backs are textless and language-neutral, so they are REUSED from a shared library (`<workbench-root>/assets/card-backs/`) before any new one is generated - a new back is only made when nothing fits the theme, and it is saved back into the library for future games.
+10. **API key rotation** - Settings holds two key pools: Claude API keys and image-generation keys (one per line). Builders and the foreman take the next key from each pool in turn, so one key's 5-hour quota window doesn't stall the factory. When a key returns 429, it is skipped until its quota window resets (parsed from the error when possible); the queue pauses only when every key is spent. Keys live only in the local workbench DB - never in this repo.
 
 ## What lives where
 
 - `~/Projects/card0/card0-workbench/` - workbench root (override with `CARD0_WORKBENCH_ROOT`)
-  - `workbench.db` - SQLite (videos, jobs, events, artifacts, messages, games, settings)
+  - `workbench.db` - SQLite (videos, jobs, events, artifacts, messages, games, settings, API key pools)
   - `jobs/<jobId>/` - per-job agent workspace (manifest, cards_raw/, compressed/, result.json, `.workbench/tasks.json` progress protocol)
+  - `assets/card-backs/` - shared textless card-back library (reused across games and languages)
 
 ## Requirements
 

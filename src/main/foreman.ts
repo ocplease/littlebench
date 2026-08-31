@@ -1,6 +1,7 @@
 import { runAgent, AgentRun, ClaudeStreamEvent } from './agent-runner'
 import { getSetting, setSetting, insertForemanMessage } from './db'
 import { workbenchRoot, repoRoot, shellEnv } from './paths'
+import { agentEnv } from './keys'
 
 /** The foreman: the chat agent the user talks to. It operates the factory
  *  through the `lb` CLI (bin/lb) - ingest channels, scout videos, queue jobs,
@@ -105,11 +106,15 @@ export function sendForeman(message: string): { ok: boolean; error?: string } {
   return { ok: true }
 }
 
-/** PATH with the repo's bin/ prepended so `lb` resolves inside the agent. */
+/** PATH with the repo's bin/ prepended so `lb` resolves inside the agent,
+ *  plus the next key from the rotation pools. */
 function lbEnv(): Record<string, string> {
   const env = shellEnv()
   const bin = `${repoRoot()}/bin`
-  return { PATH: `${bin}:${env.PATH ?? process.env.PATH ?? ''}` }
+  return {
+    PATH: `${bin}:${env.PATH ?? process.env.PATH ?? ''}`,
+    ...agentEnv()
+  }
 }
 
 export function resetForeman(): void {

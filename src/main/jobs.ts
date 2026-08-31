@@ -4,8 +4,9 @@ import { existsSync, readFileSync, readdirSync, mkdirSync, statSync, writeFileSy
 import path from 'node:path'
 import { runAgent, AgentRun, ClaudeStreamEvent } from './agent-runner'
 import { detectStage } from './stages'
-import { jobWorkspace, CARD0_BIN, shellEnv } from './paths'
+import { jobWorkspace, backLibraryDir, CARD0_BIN, shellEnv } from './paths'
 import { parseProtocol, applyProtocol, PROTOCOL_CONTRACT } from './protocol'
+import { agentEnv, coolKey, claudeKeysAvailable, parseQuotaReset } from './keys'
 import { insertMessage } from './db'
 import {
   getJob, getSetting, setSetting, insertJob, listJobs, updateJob, appendEvent, upsertGame,
@@ -28,6 +29,8 @@ export function setShuttingDown(): void {
 }
 
 const running = new Map<string, AgentRun>()
+/** Which rotated claude key each live job is spending (for 429 cooldown). */
+const jobClaudeKeys = new Map<string, string>()
 
 /** Backend quota / rate-limit errors: the job is fine, the plan isn't. */
 function quotaError(text: string): boolean {
@@ -131,6 +134,10 @@ export function buildGamePrompt(job: JobRow): string {
     '  (omit deckIds keys that do not apply to this game)',
     '- Use the byted-ark-seedream-skill for all image generation; save generated art under',
     '  this workspace (cards_raw/ for PNGs, compressed/ for JPEGs).',
+    '- Card backs: every card needs one (card0 --face back). REUSE FIRST: pick a textless back',
+    `  from the shared library at ${backLibraryDir()} and copy it to card_back.jpg in this`,
+    '  workspace. Only generate a new back if none fits the theme - and then also cp the new',
+    '  back into that library (descriptive theme name) so future games reuse it.',
     NO_IMAGE_INPUT,
     PROTOCOL_CONTRACT
   ]
@@ -143,6 +150,10 @@ export function buildLocalizePrompt(parent: JobRow, language: 'zh-Hans' | 'ja'):
     'You are running inside an automated workbench. Create a localized card0 game.',
     `Source English game job workspace: ${jobWorkspace(parent.id)}`,
     `Read its result.json and manifest.json first.`,
+    `- Card back: copy the parent workspace's card_back.jpg into this workspace and reuse it`,
+    `  as-is (backs are language-neutral). If the parent has none, take a textless back from the`,
+    `  shared library at ${backLibraryDir()}; only if that is empty too, generate one textless`,
+    `  back and cp it into the library so other games reuse it.`,
     '',
     `Follow the card0-game-create skill, Stage 9 "If localizing after the fact": translate the manifest`,
     `into ${langName} (language code "${language}"), create a NEW card0 game, regenerate ALL artwork`,
@@ -223,10 +234,14 @@ export function executeJobWithPrompt(
     if (parsed) prevProtocolJson = applyProtocol(jobId, parsed, prevProtocolJson) ? JSON.stringify(parsed) : prevProtocolJson
   }
 
+  const keyEnv = agentEnv()
+  if (keyEnv.ANTHROPIC_AUTH_TOKEN) jobClaudeKeys.set(jobId, keyEnv.ANTHROPIC_AUTH_TOKEN)
+
   const run = runAgent({
     cwd: workspace,
     prompt,
     model: model || undefined,
+    env: Object.keys(keyEnv).length ? keyEnv : undefined,
     bypassPermissions: bypass,
     sessionId: opts.resumeSessionId ? undefined : (job.session_id ?? undefined),
     resumeSessionId: opts.resumeSessionId,
@@ -252,13 +267,23 @@ export function executeJobWithPrompt(
         if (!isError) {
           finalizeJob(jobId, event)
         } else if (quotaError(String(event.result ?? ''))) {
-          // Backend quota exhausted: transient, not the job's fault. Park it
-          // back in the queue and pause building until the window resets -
-          // pumpQueue retries automatically once the pause lapses.
-          setSetting('quota_until', new Date(Date.now() + 30 * 60 * 1000).toISOString())
+          // Backend quota exhausted: transient, not the job's fault. Cool the
+          // key this job was spending and park the job back in the queue. If
+          // other keys remain, the next run rotates to one of them; only pause
+          // the whole queue when the pool is dry (or no pool is configured).
+          const errText = String(event.result ?? '')
+          const fallback = new Date(Date.now() + 30 * 60 * 1000).toISOString()
+          const spent = jobClaudeKeys.get(jobId)
+          if (spent) {
+            const until = parseQuotaReset(errText) ?? fallback
+            coolKey(spent, until)
+            if (!claudeKeysAvailable()) setSetting('quota_until', until)
+          } else {
+            setSetting('quota_until', fallback)
+          }
           updateJob(jobId, {
             status: 'queued',
-            error: String(event.result ?? ''),
+            error: errText,
             finished_at: null,
             session_id: null // fresh run; workspace artifacts are reused
           })
@@ -279,6 +304,7 @@ export function executeJobWithPrompt(
     },
     onExit: (code) => {
       running.delete(jobId)
+      jobClaudeKeys.delete(jobId)
       clearInterval(protocolTimer)
       clearLock(jobId)
       pollProtocol() // catch a final write the stream events didn't cover
@@ -322,7 +348,30 @@ function finalizeJob(jobId: string, result: ClaudeStreamEvent): void {
     finished_at: new Date().toISOString()
   })
   recordGame(jobId, game)
+  const finished = getJob(jobId)
+  if (finished) queueLocalizations(finished)
   emit('jobs:changed', null)
+}
+
+/** Every game ships in three languages: when the English build lands in review,
+ *  queue zh-Hans and ja localization jobs (unless they already exist). */
+function queueLocalizations(parent: JobRow): void {
+  if (getSetting('autoLocalize', 'true') !== 'true') return
+  if (parent.language !== 'en') return
+  const existing = listJobs().filter((j) => j.parent_job_id === parent.id)
+  let added = false
+  for (const lang of ['zh-Hans', 'ja'] as const) {
+    if (existing.some((c) => c.language === lang)) continue
+    createJob({
+      title: `${parent.title} (${lang})`,
+      youtube_url: parent.youtube_url,
+      language: lang,
+      parent_job_id: parent.id,
+      autostart: false
+    })
+    added = true
+  }
+  if (added) pumpQueue()
 }
 
 /** Agent finished its pass: awaiting review, or blocked on a human question. */
@@ -336,6 +385,8 @@ function finalizeFromDisk(jobId: string): void {
   const game = parseResultJson(jobId)
   updateJob(jobId, { status: finalStatus(jobId), finished_at: new Date().toISOString() })
   recordGame(jobId, game)
+  const finished = getJob(jobId)
+  if (finished) queueLocalizations(finished)
   emit('jobs:changed', null)
 }
 
@@ -422,6 +473,13 @@ export function discardJob(jobId: string): void {
   if (run) run.kill()
   clearLock(jobId)
   updateJob(jobId, { status: 'discarded', finished_at: new Date().toISOString() })
+  // A rejected game must not get localized: drop queued/interrupted children.
+  for (const child of listJobs().filter((j) => j.parent_job_id === jobId)) {
+    if (child.status === 'queued' || child.status === 'interrupted') {
+      clearLock(child.id)
+      updateJob(child.id, { status: 'discarded', finished_at: new Date().toISOString() })
+    }
+  }
   emit('jobs:changed', null)
   pumpQueue()
 }
