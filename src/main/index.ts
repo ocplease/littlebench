@@ -59,7 +59,16 @@ function registerIpc(): void {
     imageApiKeys: getSetting('image_api_keys', '')
   }))
   handle('settings:set', (s: Record<string, string>) => {
-    for (const [k, v] of Object.entries(s)) setSetting(k, v)
+    // The renderer speaks camelCase; these DB rows are snake_case. Translate,
+    // or the keys get saved under a name nothing ever reads back.
+    const keyMap: Record<string, string> = {
+      claudeApiKeys: 'claude_api_keys',
+      imageApiKeys: 'image_api_keys'
+    }
+    for (const [k, v] of Object.entries(s)) {
+      if (k === 'quotaUntil') continue // runtime quota state, not a setting
+      setSetting(keyMap[k] ?? k, v)
+    }
     broadcast('settings:changed', null)
     return true
   })
