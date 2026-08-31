@@ -9,6 +9,7 @@ const api: WorkbenchApi = {
   // videos / channel ingest / scout funnel
   listVideos: () => ipcRenderer.invoke('videos:list'),
   setVideoStatus: (id, status, reason) => ipcRenderer.invoke('videos:setStatus', id, status, reason),
+  deleteVideo: (id) => ipcRenderer.invoke('videos:delete', id),
   ingestChannel: (url, max) => ipcRenderer.invoke('ingest:channel', url, max),
   runTriage: (videoIds) => ipcRenderer.invoke('triage:run', videoIds),
   deepScout: (videoId) => ipcRenderer.invoke('scout:deep', videoId),

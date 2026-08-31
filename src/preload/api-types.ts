@@ -115,6 +115,7 @@ export interface WorkbenchApi {
 
   listVideos(): Promise<Video[]>
   setVideoStatus(id: number, status: string, reason: string | null): Promise<void>
+  deleteVideo(id: number): Promise<void>
   ingestChannel(url: string, max?: number): Promise<IngestResult>
   runTriage(videoIds: number[]): Promise<boolean>
   deepScout(videoId: number): Promise<{ ok: boolean; error?: string }>

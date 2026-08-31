@@ -218,6 +218,13 @@ export function listVideos(): VideoRow[] {
     .all() as unknown as VideoRow[]
 }
 
+/** Remove a source video. Jobs keep their own title/url copy, so just
+ *  detach them - only the scout row itself is deleted. */
+export function deleteVideo(id: number): void {
+  getDb().prepare('UPDATE jobs SET video_id = NULL WHERE video_id = ?').run(id)
+  getDb().prepare('DELETE FROM videos WHERE id = ?').run(id)
+}
+
 export function updateVideoStatus(id: number, status: VideoStatus, reason: string | null): void {
   getDb().prepare('UPDATE videos SET status = ?, triage_reason = ? WHERE id = ?').run(status, reason, id)
 }

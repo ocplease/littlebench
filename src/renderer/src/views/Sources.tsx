@@ -66,6 +66,22 @@ export default function Sources({ videos, onChanged, onChangedJobs }: Props) {
     onChangedJobs()
   }
 
+  const remove = async (id: number) => {
+    await window.api.deleteVideo(id)
+    setSelected((prev) => {
+      const next = new Set(prev)
+      next.delete(id)
+      return next
+    })
+    onChanged()
+  }
+
+  const removeSelected = async () => {
+    for (const id of selected) await window.api.deleteVideo(id)
+    setSelected(new Set())
+    onChanged()
+  }
+
   const toggle = (id: number) => {
     setSelected((prev) => {
       const next = new Set(prev)
@@ -106,6 +122,7 @@ export default function Sources({ videos, onChanged, onChangedJobs }: Props) {
           {selected.size} selected
           <button onClick={deepScoutSelected}>Deep scout (transcripts)</button>
           <button className="primary" onClick={queueSelected}>Queue for build</button>
+          <button className="danger" onClick={removeSelected}>Delete</button>
           <button className="link" onClick={() => setSelected(new Set())}>clear</button>
         </div>
       )}
@@ -203,6 +220,9 @@ export default function Sources({ videos, onChanged, onChangedJobs }: Props) {
                   )}
                   <button className="small-btn" disabled={v.status === 'triaging'} onClick={() => deepScout(v.id)}>
                     Deep scout
+                  </button>
+                  <button className="small-btn row-del" title="Remove from sources" onClick={() => remove(v.id)}>
+                    ✕
                   </button>
                 </div>
               </td>
