@@ -42,7 +42,8 @@ function Column<T>({ title, className, items, empty, render }: {
 
 /** Linear-style board: the agent company at a glance. */
 export default function Factory({ jobs, videos, games, maxWorkers, quotaUntil, autoQueue, onOpenJob, onChanged, onGoSources }: Props) {
-  const building = jobs.filter((j) => j.status === 'running')
+  const active = jobs.filter((j) => j.status === 'running')
+  const building = jobs.filter((j) => j.status === 'running' || j.status === 'paused')
   const queued = jobs.filter((j) => j.status === 'queued')
   const review = jobs.filter((j) => j.status === 'awaiting_review' || j.status === 'needs_input' || j.status === 'interrupted' || j.status === 'failed')
   const candidates = videos.filter((v) => v.status === 'candidate')
@@ -56,7 +57,7 @@ export default function Factory({ jobs, videos, games, maxWorkers, quotaUntil, a
   const togglePause = async () => {
     if (autoQueue) {
       await window.api.setSettings({ autoQueue: 'false' })
-      for (const j of building) await window.api.stopJob(j.id)
+      for (const j of active) await window.api.pauseJob(j.id)
     } else {
       await window.api.setSettings({ autoQueue: 'true' })
     }
@@ -70,10 +71,10 @@ export default function Factory({ jobs, videos, games, maxWorkers, quotaUntil, a
           Workers
           <span className="worker-dots">
             {Array.from({ length: maxWorkers }, (_, i) => (
-              <span key={i} className={`worker-dot ${i < building.length ? 'on' : ''}`} />
+              <span key={i} className={`worker-dot ${i < active.length ? 'on' : ''}`} />
             ))}
           </span>
-          {building.length} / {maxWorkers} active
+          {active.length} / {maxWorkers} active
         </div>
         {(building.length > 0 || !autoQueue) && (
           <button className={`small-btn pause-toggle ${autoQueue ? '' : 'paused'}`} onClick={togglePause}>
@@ -106,7 +107,7 @@ export default function Factory({ jobs, videos, games, maxWorkers, quotaUntil, a
           items={queued}
           empty="Queue is empty."
           render={(j, i) => (
-            <JobCard key={j.id} job={j} video={j.video_id ? videoById.get(j.video_id) : undefined} workerHint={building.length + i + 1} onOpen={onOpenJob} />
+            <JobCard key={j.id} job={j} video={j.video_id ? videoById.get(j.video_id) : undefined} workerHint={active.length + i + 1} onOpen={onOpenJob} />
           )}
         />
 
@@ -115,8 +116,8 @@ export default function Factory({ jobs, videos, games, maxWorkers, quotaUntil, a
           className="col-building"
           items={building}
           empty="No active builders."
-          render={(j, i) => (
-            <JobCard key={j.id} job={j} video={j.video_id ? videoById.get(j.video_id) : undefined} workerHint={i + 1} onOpen={onOpenJob} />
+          render={(j) => (
+            <JobCard key={j.id} job={j} video={j.video_id ? videoById.get(j.video_id) : undefined} onOpen={onOpenJob} />
           )}
         />
 
@@ -157,7 +158,7 @@ function FitBadge({ score }: { score: number | null }) {
 function stageProgress(job: Job): number {
   if (job.status === 'submitted') return STAGE_LIST.length
   const i = job.stage ? STAGE_LIST.findIndex((s) => s.id === job.stage) : -1
-  return i < 0 ? 0 : i + (job.status === 'running' ? 0 : 1)
+  return i < 0 ? 0 : i + (job.status === 'running' || job.status === 'paused' ? 0 : 1)
 }
 
 function JobCard({ job, video, workerHint, onOpen }: { job: Job; video?: Video; workerHint?: number; onOpen: (id: string) => void }) {
@@ -201,23 +202,24 @@ function JobCard({ job, video, workerHint, onOpen }: { job: Job; video?: Video; 
             {job.language !== 'en' && <span className="lang-chip">{job.language}</span>}
           </div>
         </div>
-        {job.status === 'running' && (
+        {(job.status === 'running' || job.status === 'paused') && (
           <button
-            className="icon-btn pause-btn"
-            title="Pause this build (stops the agent, holds the queue; restart from its card)"
+            className={`icon-btn pause-btn ${job.status === 'paused' ? 'resumable' : ''}`}
+            title={job.status === 'running' ? 'Pause this build (agent stops, progress stays on the board)' : 'Resume this build'}
             disabled={pausing}
-            onClick={pauseBuild}
+            onClick={job.status === 'running' ? pauseBuild : (e) => { e.stopPropagation(); window.api.resumeJob(job.id) }}
           >
-            {pausing ? '…' : '⏸'}
+            {pausing ? '…' : job.status === 'running' ? '⏸' : '▶'}
           </button>
         )}
       </div>
 
-      {job.status === 'running' && (
-        <div className="issue-progress">
+      {(job.status === 'running' || job.status === 'paused') && (
+        <div className={`issue-progress ${job.status === 'paused' ? 'is-paused' : ''}`}>
           <div className="progress-label">
-            {workerHint ? <span className="worker-tag">Builder #{workerHint}</span> : null}
+            {workerHint && job.status === 'running' ? <span className="worker-tag">Builder #{workerHint}</span> : null}
             <span>{phaseLabel(job.phase)}</span>
+            {job.status === 'paused' && <span className="chip chip-paused">⏸ Paused</span>}
           </div>
           <div className="progress-bar">
             <div className="progress-fill" style={{ width: `${(progress / STAGE_LIST.length) * 100}%` }} />

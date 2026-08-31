@@ -117,7 +117,7 @@ export default function Workspace({ job, onBack, onChanged }: Props) {
 
   const isReview = job.status === 'awaiting_review'
   const needsInput = job.status === 'needs_input'
-  const steerable = !live && job.session_id && ['awaiting_review', 'needs_input', 'interrupted', 'submitted', 'failed'].includes(job.status)
+  const steerable = !live && job.session_id && ['awaiting_review', 'needs_input', 'interrupted', 'submitted', 'failed', 'paused'].includes(job.status)
 
   const result = (() => {
     try {
@@ -164,6 +164,11 @@ export default function Workspace({ job, onBack, onChanged }: Props) {
               </button>
               <button disabled={busy} onClick={() => act(() => window.api.discardJob(job.id), 'Discard')}>Discard</button>
             </>
+          )}
+          {job.status === 'paused' && (
+            <button className="primary" disabled={busy} onClick={() => act(() => window.api.resumeJob(job.id), 'Resume')}>
+              Resume
+            </button>
           )}
           {(job.status === 'failed' || job.status === 'interrupted' || job.status === 'discarded') && (
             <button disabled={busy} onClick={() => act(() => window.api.restartJob(job.id), 'Restart')}>Restart</button>

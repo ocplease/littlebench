@@ -24,7 +24,7 @@ export interface Job {
   video_id: number | null
   title: string
   youtube_url: string | null
-  status: 'queued' | 'running' | 'awaiting_review' | 'needs_input' | 'submitted' | 'failed' | 'interrupted' | 'discarded'
+  status: 'queued' | 'running' | 'paused' | 'awaiting_review' | 'needs_input' | 'submitted' | 'failed' | 'interrupted' | 'discarded'
   language: string
   parent_job_id: string | null
   session_id: string | null
@@ -124,6 +124,8 @@ export interface WorkbenchApi {
   queueVideos(videos: Array<{ id: number; title: string; url: string }>): Promise<string[]>
   startJob(id: string): Promise<boolean>
   stopJob(id: string): Promise<boolean>
+  pauseJob(id: string): Promise<boolean>
+  resumeJob(id: string): Promise<boolean>
   approveJob(id: string): Promise<ApproveResult>
   discardJob(id: string): Promise<boolean>
   restartJob(id: string): Promise<boolean>

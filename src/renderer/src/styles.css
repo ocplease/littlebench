@@ -988,3 +988,8 @@ input[type='checkbox'] { transform: scale(1.2); }
 }
 .pause-btn:hover { color: #e3b341; border-color: rgba(227, 179, 65, 0.5); }
 .pause-btn:disabled { opacity: 0.5; cursor: default; }
+
+.chip-paused { color: #e3b341; border-color: rgba(227, 179, 65, 0.5); background: rgba(227, 179, 65, 0.08); }
+.issue-progress.is-paused .progress-fill { opacity: 0.45; }
+.pause-btn.resumable { color: #2ea043; border-color: rgba(46, 160, 67, 0.5); }
+.pause-btn.resumable:hover { color: #2ea043; }

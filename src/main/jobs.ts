@@ -198,12 +198,50 @@ export function startJob(jobId: string): void {
   if (!job || job.status === 'running' || running.has(jobId)) return
   if (liveRunCount(jobId) >= maxWorkers()) return // all worker slots busy
 
+  // A paused build resumes its own session: the agent picks up where it
+  // stopped instead of redoing completed stages.
+  if (job.status === 'paused' && job.session_id) {
+    executeJobWithPrompt(jobId, buildResumePrompt(), { resumeSessionId: job.session_id })
+    return
+  }
+
   const prompt =
     job.language === 'en'
       ? buildGamePrompt(job)
       : buildLocalizePrompt(getJob(job.parent_job_id!) ?? job, job.language as 'zh-Hans' | 'ja')
 
   executeJobWithPrompt(jobId, prompt)
+}
+
+/** Message sent into a resumed (paused-mid-build) session. */
+function buildResumePrompt(): string {
+  return [
+    'Your build was paused by the human and is now resumed.',
+    'Continue from where you left off in this same workspace - do NOT redo completed stages;',
+    'reuse the files already on disk. Finish the pipeline per the original instructions,',
+    'maintain .workbench/tasks.json, and write result.json when done.',
+    NO_IMAGE_INPUT,
+    PROTOCOL_CONTRACT
+  ].join('\n')
+}
+
+/** Pause a running build: stop the agent, keep the job in the Building column
+ *  with its phase/progress frozen. Resume continues the same session. */
+export function pauseJob(jobId: string): void {
+  const run = running.get(jobId)
+  if (run) run.kill()
+  clearLock(jobId)
+  updateJob(jobId, { status: 'paused' }) // session_id, phase, stage stay
+  emit('jobs:changed', null)
+}
+
+/** Resume a paused build now - explicit action, works even while the queue is held. */
+export function resumeJob(jobId: string): void {
+  const job = getJob(jobId)
+  if (!job || job.status !== 'paused') return
+  updateJob(jobId, { status: 'queued', error: null })
+  startJob(jobId)
+  emit('jobs:changed', null)
 }
 
 /** Run a job with an explicit prompt (used by startJob, steering and the CLI driver). */
@@ -538,7 +576,8 @@ export function pumpQueue(): void {
   if (quotaPaused()) return // quota window exhausted; retry when it lapses
   const slots = maxWorkers() - liveRunCount()
   if (slots <= 0) return
-  const queued = listJobs().filter((j) => j.status === 'queued')
+  // Paused builds rejoin automatically once the queue is resumed.
+  const queued = listJobs().filter((j) => j.status === 'queued' || j.status === 'paused')
   for (const job of queued.slice(0, slots)) {
     startJob(job.id)
   }

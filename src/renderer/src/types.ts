@@ -31,6 +31,7 @@ export function phaseLabel(phase: string | null | undefined): string {
 export const STATUS_LABEL: Record<string, string> = {
   queued: 'Queued',
   running: 'Building',
+  paused: 'Paused',
   awaiting_review: 'Awaiting review',
   needs_input: 'Needs your input',
   submitted: 'Published',

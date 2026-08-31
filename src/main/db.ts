@@ -7,6 +7,7 @@ export type VideoStatus = 'new' | 'triaging' | 'candidate' | 'rejected' | 'queue
 export type JobStatus =
   | 'queued'
   | 'running'
+  | 'paused'
   | 'awaiting_review'
   | 'needs_input'
   | 'submitted'
