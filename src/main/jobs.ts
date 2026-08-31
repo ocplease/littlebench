@@ -285,14 +285,18 @@ export function executeJobWithPrompt(
       const current = getJob(jobId)
       // 143 = SIGTERM, 130 = SIGINT: the workbench (or the OS) stopped the
       // agent, it didn't fail on its own. stopJob already set its own status,
-      // so reaching here with one of those codes means an external kill.
-      const interrupted = shuttingDown || code === 143 || code === 130
+      // so reaching here with one of those codes means an external kill -
+      // put the job back in the queue so the next launch auto-resumes it.
+      // (Deliberate stops and crash leftovers stay 'interrupted' for manual
+      // restart: stopJob sets that status before the kill takes effect.)
+      const killed = shuttingDown || code === 143 || code === 130
       if (current && current.status === 'running') {
         // exited without a result event
         updateJob(jobId, {
-          status: code === 0 ? 'awaiting_review' : interrupted ? 'interrupted' : 'failed',
-          error: code === 0 || interrupted ? null : `agent exited with code ${code}`,
-          finished_at: new Date().toISOString()
+          status: code === 0 ? 'awaiting_review' : killed ? 'queued' : 'failed',
+          error: code === 0 || killed ? null : `agent exited with code ${code}`,
+          finished_at: code === 0 || !killed ? new Date().toISOString() : null,
+          session_id: killed ? null : current.session_id
         })
         if (code === 0) finalizeFromDisk(jobId)
       }
