@@ -9,6 +9,7 @@ interface Props {
   games: Game[]
   maxWorkers: number
   quotaUntil: string
+  keyPool: { total: number; cooling: number; nextAvailable?: string }
   autoQueue: boolean
   onOpenJob: (jobId: string) => void
   onChanged: () => void
@@ -41,7 +42,7 @@ function Column<T>({ title, className, items, empty, render }: {
 }
 
 /** Linear-style board: the agent company at a glance. */
-export default function Factory({ jobs, videos, games, maxWorkers, quotaUntil, autoQueue, onOpenJob, onChanged, onGoSources }: Props) {
+export default function Factory({ jobs, videos, games, maxWorkers, quotaUntil, keyPool, autoQueue, onOpenJob, onChanged, onGoSources }: Props) {
   const active = jobs.filter((j) => j.status === 'running')
   const building = jobs.filter((j) => j.status === 'running' || j.status === 'paused')
   const queued = jobs.filter((j) => j.status === 'queued')
@@ -89,8 +90,19 @@ export default function Factory({ jobs, videos, games, maxWorkers, quotaUntil, a
 
       {quotaPaused && (
         <div className="quota-note">
-          Backend quota exhausted - queued builds resume automatically after{' '}
-          {new Date(quotaUntil).toLocaleTimeString()}.
+          {keyPool.total > 0 && keyPool.cooling >= keyPool.total ? (
+            <>
+              All {keyPool.total} API keys hit their quota - rotated through every one. If they
+              belong to the same account they share its quota window; keys from different accounts
+              would keep the factory running. Builds resume automatically after{' '}
+              {new Date(quotaUntil).toLocaleTimeString()}.
+            </>
+          ) : (
+            <>
+              Backend quota exhausted - queued builds resume automatically after{' '}
+              {new Date(quotaUntil).toLocaleTimeString()}.
+            </>
+          )}
         </div>
       )}
 

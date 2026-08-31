@@ -90,6 +90,7 @@ export interface Settings {
   autoLocalize: string
   claudeApiKeys: string
   imageApiKeys: string
+  keyPool: { total: number; cooling: number; nextAvailable?: string }
 }
 
 export interface IngestResult {

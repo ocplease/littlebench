@@ -52,6 +52,28 @@ function usable(keys: string[]): string[] {
   })
 }
 
+/** Snapshot for the UI: how many keys exist, how many are cooling, and
+ *  when the earliest one comes back. */
+export function keyPoolStatus(): { total: number; cooling: number; nextAvailable?: string } {
+  const keys = claudeKeys()
+  const map = cooldowns()
+  const now = Date.now()
+  let cooling = 0
+  let next: number | undefined
+  for (const k of keys) {
+    const t = map[fp(k)] ? new Date(map[fp(k)]).getTime() : 0
+    if (t > now) {
+      cooling++
+      if (next === undefined || t < next) next = t
+    }
+  }
+  return {
+    total: keys.length,
+    cooling,
+    nextAvailable: next !== undefined ? new Date(next).toISOString() : undefined
+  }
+}
+
 /** Any configured claude key still inside its quota window? */
 export function claudeKeysAvailable(): boolean {
   return usable(claudeKeys()).length > 0

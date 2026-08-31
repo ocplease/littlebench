@@ -7,6 +7,7 @@ import { setBroadcast, setShuttingDown, createJob, startJob, stopJob, pauseJob, 
 import { ingestChannel, scoutVideos, deepScoutVideo } from './ingest'
 import { updateVideoStatus, updateVideoScout, deleteVideo } from './db'
 import { setForemanBroadcast, sendForeman, foremanBusy, resetForeman } from './foreman'
+import { keyPoolStatus } from './keys'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -56,7 +57,8 @@ function registerIpc(): void {
     quotaUntil: getSetting('quota_until', ''),
     autoLocalize: getSetting('autoLocalize', 'true'),
     claudeApiKeys: getSetting('claude_api_keys', ''),
-    imageApiKeys: getSetting('image_api_keys', '')
+    imageApiKeys: getSetting('image_api_keys', ''),
+    keyPool: keyPoolStatus()
   }))
   handle('settings:set', (s: Record<string, string>) => {
     // The renderer speaks camelCase; these DB rows are snake_case. Translate,
@@ -67,6 +69,7 @@ function registerIpc(): void {
     }
     for (const [k, v] of Object.entries(s)) {
       if (k === 'quotaUntil') continue // runtime quota state, not a setting
+      if (typeof v !== 'string') continue // e.g. keyPool snapshot, read-only
       setSetting(keyMap[k] ?? k, v)
     }
     broadcast('settings:changed', null)

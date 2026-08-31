@@ -17,6 +17,7 @@ export default function App() {
   const [games, setGames] = useState<Game[]>([])
   const [maxWorkers, setMaxWorkers] = useState(3)
   const [quotaUntil, setQuotaUntil] = useState('')
+  const [keyPool, setKeyPool] = useState<{ total: number; cooling: number; nextAvailable?: string }>({ total: 0, cooling: 0 })
   const [autoQueue, setAutoQueue] = useState(true)
 
   const refreshJobs = useCallback(() => {
@@ -35,6 +36,7 @@ export default function App() {
       window.api.getSettings().then((s) => {
         setMaxWorkers(Number(s.maxWorkers) || 3)
         setQuotaUntil(s.quotaUntil ?? '')
+        setKeyPool(s.keyPool ?? { total: 0, cooling: 0 })
         setAutoQueue((s.autoQueue ?? 'true') !== 'false')
       })
     }
@@ -133,6 +135,7 @@ export default function App() {
             games={games}
             maxWorkers={maxWorkers}
             quotaUntil={quotaUntil}
+            keyPool={keyPool}
             autoQueue={autoQueue}
             onOpenJob={setSelectedJobId}
             onChanged={refreshJobs}
