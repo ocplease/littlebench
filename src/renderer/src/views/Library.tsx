@@ -69,16 +69,24 @@ export default function Library({ jobs, games, onChanged }: Props) {
                       Open in card0 ↗
                     </button>
                   )}
-                  {g.language === 'en' && job?.status === 'submitted' && (
-                    <>
-                      <button className="small-btn" disabled={busy} onClick={() => localize(g, 'zh-Hans')}>
-                        Localize 中文
-                      </button>
-                      <button className="small-btn" disabled={busy} onClick={() => localize(g, 'ja')}>
-                        Localize 日本語
-                      </button>
-                    </>
-                  )}
+                  {g.language === 'en' && job?.status === 'submitted' &&
+                    (['zh-Hans', 'ja'] as const).map((lang) => {
+                      // hide once that language exists (or is queued/running)
+                      const localized = jobs.some(
+                        (j) => j.parent_job_id === g.job_id && j.language === lang && j.status !== 'discarded'
+                      )
+                      if (localized) return null
+                      return (
+                        <button
+                          key={lang}
+                          className="small-btn"
+                          disabled={busy}
+                          onClick={() => localize(g, lang)}
+                        >
+                          {lang === 'zh-Hans' ? 'Localize 中文' : 'Localize 日本語'}
+                        </button>
+                      )
+                    })}
                 </div>
               </div>
             </article>

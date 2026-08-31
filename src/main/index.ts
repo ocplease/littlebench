@@ -159,6 +159,12 @@ function registerIpc(): void {
   handle('jobs:localize', (jobId: string, language: string) => {
     const parent = getJob(jobId)
     if (!parent) return null
+    // Never duplicate a localization - the EN build's auto-queue may have
+    // already created it. Reuse the existing child (discarded ones don't count).
+    const existing = listJobs().find(
+      (j) => j.parent_job_id === parent.id && j.language === language && j.status !== 'discarded'
+    )
+    if (existing) return existing.id
     return createJob({
       title: `${parent.title} (${language})`,
       youtube_url: parent.youtube_url,
