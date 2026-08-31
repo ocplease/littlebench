@@ -8,7 +8,7 @@ import { jobWorkspace, CARD0_BIN, shellEnv } from './paths'
 import { parseProtocol, applyProtocol, PROTOCOL_CONTRACT } from './protocol'
 import { insertMessage } from './db'
 import {
-  getJob, getSetting, insertJob, listJobs, updateJob, appendEvent, upsertGame,
+  getJob, getSetting, setSetting, insertJob, listJobs, updateJob, appendEvent, upsertGame,
   listEvents, JobRow
 } from './db'
 
@@ -28,6 +28,18 @@ export function setShuttingDown(): void {
 }
 
 const running = new Map<string, AgentRun>()
+
+/** Backend quota / rate-limit errors: the job is fine, the plan isn't. */
+function quotaError(text: string): boolean {
+  return /\b429\b|exceeded.*(quota|limit)|quota.*exceeded|rate.?limit/i.test(text)
+}
+
+/** True while the backend quota pause is active; pumpQueue holds off. */
+function quotaPaused(): boolean {
+  const until = getSetting('quota_until', '')
+  if (!until) return false
+  return new Date(until) > new Date()
+}
 
 function emit(channel: string, payload: unknown): void {
   broadcast(channel, payload)
@@ -239,6 +251,18 @@ export function executeJobWithPrompt(
         const isError = Boolean(event.is_error)
         if (!isError) {
           finalizeJob(jobId, event)
+        } else if (quotaError(String(event.result ?? ''))) {
+          // Backend quota exhausted: transient, not the job's fault. Park it
+          // back in the queue and pause building until the window resets -
+          // pumpQueue retries automatically once the pause lapses.
+          setSetting('quota_until', new Date(Date.now() + 30 * 60 * 1000).toISOString())
+          updateJob(jobId, {
+            status: 'queued',
+            error: String(event.result ?? ''),
+            finished_at: null,
+            session_id: null // fresh run; workspace artifacts are reused
+          })
+          emit('jobs:changed', null)
         } else {
           updateJob(jobId, {
             status: 'failed',
@@ -449,6 +473,7 @@ export function steerJob(jobId: string, message: string, artifactPath?: string |
 export function pumpQueue(): void {
   if (shuttingDown) return // never spawn agents from a dying process
   if (getSetting('autoQueue', 'true') !== 'true') return
+  if (quotaPaused()) return // quota window exhausted; retry when it lapses
   const slots = maxWorkers() - liveRunCount()
   if (slots <= 0) return
   const queued = listJobs().filter((j) => j.status === 'queued')

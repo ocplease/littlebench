@@ -7,18 +7,20 @@ interface Props {
   videos: Video[]
   games: Game[]
   maxWorkers: number
+  quotaUntil: string
   onOpenJob: (jobId: string) => void
   onChanged: () => void
   onGoSources: () => void
 }
 
 /** Linear-style board: the agent company at a glance. */
-export default function Factory({ jobs, videos, games, maxWorkers, onOpenJob, onChanged, onGoSources }: Props) {
+export default function Factory({ jobs, videos, games, maxWorkers, quotaUntil, onOpenJob, onChanged, onGoSources }: Props) {
   const building = jobs.filter((j) => j.status === 'running')
   const queued = jobs.filter((j) => j.status === 'queued')
   const review = jobs.filter((j) => j.status === 'awaiting_review' || j.status === 'needs_input' || j.status === 'interrupted' || j.status === 'failed')
   const candidates = videos.filter((v) => v.status === 'candidate')
   const published = games.filter((g) => g.status === 'submitted' || g.status === 'published')
+  const quotaPaused = quotaUntil && new Date(quotaUntil) > new Date()
 
   const videoById = new Map(videos.map((v) => [v.id, v]))
 
@@ -36,6 +38,13 @@ export default function Factory({ jobs, videos, games, maxWorkers, onOpenJob, on
           {building.length} / {maxWorkers} active
         </div>
       </div>
+
+      {quotaPaused && (
+        <div className="quota-note">
+          Backend quota exhausted - queued builds resume automatically after{' '}
+          {new Date(quotaUntil).toLocaleTimeString()}.
+        </div>
+      )}
 
       <div className="board">
         <section className="board-col">

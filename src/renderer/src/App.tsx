@@ -16,6 +16,7 @@ export default function App() {
   const [videos, setVideos] = useState<Video[]>([])
   const [games, setGames] = useState<Game[]>([])
   const [maxWorkers, setMaxWorkers] = useState(3)
+  const [quotaUntil, setQuotaUntil] = useState('')
 
   const refreshJobs = useCallback(() => {
     window.api.listJobs().then((j) => setJobs(j as Job[]))
@@ -29,7 +30,13 @@ export default function App() {
 
   useEffect(() => {
     window.api.bootstrap()
-    window.api.getSettings().then((s) => setMaxWorkers(Number(s.maxWorkers) || 3))
+    const readSettings = () => {
+      window.api.getSettings().then((s) => {
+        setMaxWorkers(Number(s.maxWorkers) || 3)
+        setQuotaUntil(s.quotaUntil ?? '')
+      })
+    }
+    readSettings()
     refreshJobs()
     refreshVideos()
     refreshGames()
@@ -37,10 +44,14 @@ export default function App() {
       window.api.on('jobs:changed', () => {
         refreshJobs()
         refreshGames()
+        readSettings()
       }),
       window.api.on('videos:changed', () => refreshVideos())
     ]
-    const timer = setInterval(refreshJobs, 10_000)
+    const timer = setInterval(() => {
+      refreshJobs()
+      readSettings()
+    }, 10_000)
     return () => {
       offs.forEach((off) => off())
       clearInterval(timer)
@@ -118,6 +129,7 @@ export default function App() {
             videos={videos}
             games={games}
             maxWorkers={maxWorkers}
+            quotaUntil={quotaUntil}
             onOpenJob={setSelectedJobId}
             onChanged={refreshJobs}
             onGoSources={() => setView('sources')}

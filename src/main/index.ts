@@ -52,7 +52,8 @@ function registerIpc(): void {
     autoQueue: getSetting('autoQueue', 'true'),
     bypassPermissions: getSetting('bypassPermissions', 'true'),
     maxVideos: getSetting('maxVideos', '50'),
-    maxWorkers: getSetting('maxWorkers', '3')
+    maxWorkers: getSetting('maxWorkers', '3'),
+    quotaUntil: getSetting('quota_until', '')
   }))
   handle('settings:set', (s: Record<string, string>) => {
     for (const [k, v] of Object.entries(s)) setSetting(k, v)

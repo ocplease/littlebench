@@ -86,6 +86,7 @@ export interface Settings {
   bypassPermissions: string
   maxVideos: string
   maxWorkers: string
+  quotaUntil: string
 }
 
 export interface IngestResult {
