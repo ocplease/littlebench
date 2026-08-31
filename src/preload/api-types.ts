@@ -125,6 +125,7 @@ export interface WorkbenchApi {
   startJob(id: string): Promise<boolean>
   stopJob(id: string): Promise<boolean>
   pauseJob(id: string): Promise<boolean>
+  syncJobStatus(id: string): Promise<{ ok: boolean; status?: string; error?: string }>
   resumeJob(id: string): Promise<boolean>
   approveJob(id: string): Promise<ApproveResult>
   discardJob(id: string): Promise<boolean>

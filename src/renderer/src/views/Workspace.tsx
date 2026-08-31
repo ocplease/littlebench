@@ -79,6 +79,14 @@ export default function Workspace({ job, onBack, onChanged }: Props) {
     }
   }, [job.id, loadEvents, loadGallery, loadSide, onChanged])
 
+  // The human may have published this game directly on the card0 site -
+  // on open, pull the real status before offering Approve & publish again.
+  useEffect(() => {
+    if (job.status !== 'awaiting_review' && job.status !== 'needs_input') return
+    if (!job.card0_game_id) return
+    window.api.syncJobStatus(job.id).then(() => onChanged())
+  }, [job.id, job.status, job.card0_game_id, onChanged])
+
   const act = async (fn: () => Promise<unknown>, label: string) => {
     setBusy(true)
     setNotice(null)

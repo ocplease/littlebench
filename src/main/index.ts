@@ -3,7 +3,7 @@ import path from 'node:path'
 import { readFileSync, existsSync } from 'node:fs'
 import { ensureDirs, jobWorkspace } from './paths'
 import { getDb, getSetting, setSetting, listVideos, listJobs, getJob, listGames, listArtifactsByJob, listMessages, listForemanMessages } from './db'
-import { setBroadcast, setShuttingDown, createJob, startJob, stopJob, pauseJob, resumeJob, approveJob, discardJob, restartJob, steerJob, jobEventsFromDb, listArtifacts, recoverInterrupted, pumpQueue, openGame, jobIsLive } from './jobs'
+import { setBroadcast, setShuttingDown, createJob, startJob, stopJob, pauseJob, resumeJob, approveJob, syncJobStatus, discardJob, restartJob, steerJob, jobEventsFromDb, listArtifacts, recoverInterrupted, pumpQueue, openGame, jobIsLive } from './jobs'
 import { ingestChannel, scoutVideos, deepScoutVideo } from './ingest'
 import { updateVideoStatus, updateVideoScout } from './db'
 import { setForemanBroadcast, sendForeman, foremanBusy, resetForeman } from './foreman'
@@ -136,6 +136,7 @@ function registerIpc(): void {
     return true
   })
   handle('jobs:approve', (id: string) => approveJob(id))
+  handle('jobs:syncStatus', (id: string) => syncJobStatus(id))
   handle('jobs:discard', (id: string) => {
     discardJob(id)
     return true

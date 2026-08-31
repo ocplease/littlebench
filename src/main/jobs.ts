@@ -484,6 +484,41 @@ export function stopJob(jobId: string): void {
   pumpQueue()
 }
 
+/** Ask card0 for the game's real status. The human may have published it
+ *  directly on the card0 site - mirror that here instead of offering
+ *  "Approve & publish" again for an already-live game. */
+export function syncJobStatus(jobId: string): { ok: boolean; status?: string; error?: string } {
+  const job = getJob(jobId)
+  if (!job) return { ok: false, error: 'job not found' }
+  if (!job.card0_game_id) return { ok: false, error: 'no card0 game yet' }
+  if (!['awaiting_review', 'needs_input', 'interrupted', 'failed'].includes(job.status)) {
+    return { ok: true, status: job.status }
+  }
+  try {
+    const out = execSync(`${CARD0_BIN} game show ${job.card0_game_id}`, {
+      encoding: 'utf8',
+      env: shellEnv(),
+      timeout: 30_000
+    })
+    const remote = JSON.parse(out) as { status?: string }
+    if (remote.status === 'published' || remote.status === 'submitted') {
+      updateJob(jobId, { status: 'submitted', finished_at: new Date().toISOString() })
+      upsertGame({
+        job_id: jobId,
+        language: job.language,
+        card0_game_id: job.card0_game_id,
+        status: 'published',
+        submitted_at: new Date().toISOString()
+      })
+      emit('jobs:changed', null)
+      return { ok: true, status: 'published' }
+    }
+    return { ok: true, status: remote.status ?? 'draft' }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
 export function approveJob(jobId: string): { ok: boolean; error?: string } {
   const job = getJob(jobId)
   if (!job) return { ok: false, error: 'job not found' }

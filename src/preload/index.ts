@@ -20,6 +20,7 @@ const api: WorkbenchApi = {
   startJob: (id) => ipcRenderer.invoke('jobs:start', id),
   stopJob: (id) => ipcRenderer.invoke('jobs:stop', id),
   pauseJob: (id) => ipcRenderer.invoke('jobs:pause', id),
+  syncJobStatus: (id) => ipcRenderer.invoke('jobs:syncStatus', id),
   resumeJob: (id) => ipcRenderer.invoke('jobs:resume', id),
   approveJob: (id) => ipcRenderer.invoke('jobs:approve', id),
   discardJob: (id) => ipcRenderer.invoke('jobs:discard', id),
