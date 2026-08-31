@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { ReactNode } from 'react'
 import type { Job, Video, Game } from '../types'
 import { STAGE_LIST, phaseLabel, STATUS_LABEL } from '../types'
 
@@ -8,13 +9,39 @@ interface Props {
   games: Game[]
   maxWorkers: number
   quotaUntil: string
+  autoQueue: boolean
   onOpenJob: (jobId: string) => void
   onChanged: () => void
   onGoSources: () => void
 }
 
+/** Board column: shows the first `initial` items, then expands in +5 steps. */
+function Column<T>({ title, className, items, empty, render }: {
+  title: string
+  className?: string
+  items: T[]
+  empty: ReactNode
+  render: (item: T, index: number) => ReactNode
+}) {
+  const [limit, setLimit] = useState(10)
+  const visible = items.slice(0, limit)
+  const hidden = items.length - visible.length
+  return (
+    <section className={`board-col ${className ?? ''}`}>
+      <header>{title} <span className="col-count">{items.length}</span></header>
+      {items.length === 0 && <div className="board-empty">{empty}</div>}
+      {visible.map(render)}
+      {hidden > 0 && (
+        <button className="link col-more" onClick={() => setLimit((n) => n + 5)}>
+          +5 more · {hidden} hidden
+        </button>
+      )}
+    </section>
+  )
+}
+
 /** Linear-style board: the agent company at a glance. */
-export default function Factory({ jobs, videos, games, maxWorkers, quotaUntil, onOpenJob, onChanged, onGoSources }: Props) {
+export default function Factory({ jobs, videos, games, maxWorkers, quotaUntil, autoQueue, onOpenJob, onChanged, onGoSources }: Props) {
   const building = jobs.filter((j) => j.status === 'running')
   const queued = jobs.filter((j) => j.status === 'queued')
   const review = jobs.filter((j) => j.status === 'awaiting_review' || j.status === 'needs_input' || j.status === 'interrupted' || j.status === 'failed')
@@ -23,6 +50,17 @@ export default function Factory({ jobs, videos, games, maxWorkers, quotaUntil, o
   const quotaPaused = quotaUntil && new Date(quotaUntil) > new Date()
 
   const videoById = new Map(videos.map((v) => [v.id, v]))
+
+  /** Pause = stop every running builder and hold the queue (jobs stay parked,
+   *  restartable from their cards). Resume lets pumpQueue fill the slots again. */
+  const togglePause = async () => {
+    if (autoQueue) {
+      await window.api.setSettings({ autoQueue: 'false' })
+      for (const j of building) await window.api.stopJob(j.id)
+    } else {
+      await window.api.setSettings({ autoQueue: 'true' })
+    }
+  }
 
   return (
     <div className="factory">
@@ -37,7 +75,16 @@ export default function Factory({ jobs, videos, games, maxWorkers, quotaUntil, o
           </span>
           {building.length} / {maxWorkers} active
         </div>
+        {(building.length > 0 || !autoQueue) && (
+          <button className={`small-btn pause-toggle ${autoQueue ? '' : 'paused'}`} onClick={togglePause}>
+            {autoQueue ? '⏸ Pause' : '▶ Resume queue'}
+          </button>
+        )}
       </div>
+
+      {!autoQueue && !quotaPaused && (
+        <div className="quota-note">Queue is paused - no new builds start until you resume.</div>
+      )}
 
       {quotaPaused && (
         <div className="quota-note">
@@ -47,49 +94,47 @@ export default function Factory({ jobs, videos, games, maxWorkers, quotaUntil, o
       )}
 
       <div className="board">
-        <section className="board-col">
-          <header>Candidates <span className="col-count">{candidates.length}</span></header>
-          {candidates.length === 0 && (
-            <div className="board-empty">
-              No candidates. <button className="link" onClick={onGoSources}>Add a YouTube channel</button> and run the scout.
-            </div>
-          )}
-          {candidates.map((v) => (
-            <CandidateCard key={v.id} video={v} onChanged={onChanged} onChangedJobs={onChanged} />
-          ))}
-        </section>
+        <Column
+          title="Candidates"
+          items={candidates}
+          empty={<div className="board-empty">No candidates. <button className="link" onClick={onGoSources}>Add a YouTube channel</button> and run the scout.</div>}
+          render={(v) => <CandidateCard key={v.id} video={v} onChanged={onChanged} onChangedJobs={onChanged} />}
+        />
 
-        <section className="board-col">
-          <header>Queued <span className="col-count">{queued.length}</span></header>
-          {queued.length === 0 && <div className="board-empty">Queue is empty.</div>}
-          {queued.map((j, i) => (
+        <Column
+          title="Queued"
+          items={queued}
+          empty="Queue is empty."
+          render={(j, i) => (
             <JobCard key={j.id} job={j} video={j.video_id ? videoById.get(j.video_id) : undefined} workerHint={building.length + i + 1} onOpen={onOpenJob} />
-          ))}
-        </section>
+          )}
+        />
 
-        <section className="board-col col-building">
-          <header>Building <span className="col-count">{building.length}</span></header>
-          {building.length === 0 && <div className="board-empty">No active builders.</div>}
-          {building.map((j, i) => (
+        <Column
+          title="Building"
+          className="col-building"
+          items={building}
+          empty="No active builders."
+          render={(j, i) => (
             <JobCard key={j.id} job={j} video={j.video_id ? videoById.get(j.video_id) : undefined} workerHint={i + 1} onOpen={onOpenJob} />
-          ))}
-        </section>
+          )}
+        />
 
-        <section className="board-col col-review">
-          <header>Review <span className="col-count">{review.length}</span></header>
-          {review.length === 0 && <div className="board-empty">Nothing to review.</div>}
-          {review.map((j) => (
-            <JobCard key={j.id} job={j} video={j.video_id ? videoById.get(j.video_id) : undefined} onOpen={onOpenJob} />
-          ))}
-        </section>
+        <Column
+          title="Review"
+          className="col-review"
+          items={review}
+          empty="Nothing to review."
+          render={(j) => <JobCard key={j.id} job={j} video={j.video_id ? videoById.get(j.video_id) : undefined} onOpen={onOpenJob} />}
+        />
 
-        <section className="board-col col-published">
-          <header>Published <span className="col-count">{published.length}</span></header>
-          {published.length === 0 && <div className="board-empty">No published games yet.</div>}
-          {published.map((g) => (
-            <PublishedCard key={`${g.job_id}-${g.language}`} game={g} />
-          ))}
-        </section>
+        <Column
+          title="Published"
+          className="col-published"
+          items={published}
+          empty="No published games yet."
+          render={(g) => <PublishedCard key={`${g.job_id}-${g.language}`} game={g} />}
+        />
       </div>
     </div>
   )
@@ -117,6 +162,7 @@ function stageProgress(job: Job): number {
 
 function JobCard({ job, video, workerHint, onOpen }: { job: Job; video?: Video; workerHint?: number; onOpen: (id: string) => void }) {
   const progress = stageProgress(job)
+  const [pausing, setPausing] = useState(false)
   const imperfections = (() => {
     try {
       const r = JSON.parse(job.result_json ?? 'null')
@@ -125,6 +171,18 @@ function JobCard({ job, video, workerHint, onOpen }: { job: Job; video?: Video; 
       return 0
     }
   })()
+
+  /** Stop this build and hold the queue so nothing else fires up in its place. */
+  const pauseBuild = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setPausing(true)
+    try {
+      await window.api.setSettings({ autoQueue: 'false' })
+      await window.api.stopJob(job.id)
+    } finally {
+      setPausing(false)
+    }
+  }
 
   return (
     <article
@@ -143,6 +201,16 @@ function JobCard({ job, video, workerHint, onOpen }: { job: Job; video?: Video; 
             {job.language !== 'en' && <span className="lang-chip">{job.language}</span>}
           </div>
         </div>
+        {job.status === 'running' && (
+          <button
+            className="icon-btn pause-btn"
+            title="Pause this build (stops the agent, holds the queue; restart from its card)"
+            disabled={pausing}
+            onClick={pauseBuild}
+          >
+            {pausing ? '…' : '⏸'}
+          </button>
+        )}
       </div>
 
       {job.status === 'running' && (
@@ -171,7 +239,21 @@ function JobCard({ job, video, workerHint, onOpen }: { job: Job; video?: Video; 
         </div>
       )}
       {job.status === 'failed' && <div className="issue-line"><span className="chip chip-fail">Failed</span></div>}
-      {job.status === 'interrupted' && <div className="issue-line"><span className="chip">Interrupted</span></div>}
+      {job.status === 'interrupted' && (
+        <div className="issue-line">
+          <span className="chip">Interrupted</span>
+          <button
+            className="small-btn"
+            title="Run this build again (reuses the artifacts already in its workspace)"
+            onClick={(e) => {
+              e.stopPropagation()
+              window.api.restartJob(job.id)
+            }}
+          >
+            Restart
+          </button>
+        </div>
+      )}
       {job.status === 'submitted' && <div className="issue-line"><span className="chip chip-ok">✓ Published</span></div>}
     </article>
   )

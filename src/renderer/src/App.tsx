@@ -17,6 +17,7 @@ export default function App() {
   const [games, setGames] = useState<Game[]>([])
   const [maxWorkers, setMaxWorkers] = useState(3)
   const [quotaUntil, setQuotaUntil] = useState('')
+  const [autoQueue, setAutoQueue] = useState(true)
 
   const refreshJobs = useCallback(() => {
     window.api.listJobs().then((j) => setJobs(j as Job[]))
@@ -34,6 +35,7 @@ export default function App() {
       window.api.getSettings().then((s) => {
         setMaxWorkers(Number(s.maxWorkers) || 3)
         setQuotaUntil(s.quotaUntil ?? '')
+        setAutoQueue((s.autoQueue ?? 'true') !== 'false')
       })
     }
     readSettings()
@@ -46,7 +48,8 @@ export default function App() {
         refreshGames()
         readSettings()
       }),
-      window.api.on('videos:changed', () => refreshVideos())
+      window.api.on('videos:changed', () => refreshVideos()),
+      window.api.on('settings:changed', () => readSettings())
     ]
     const timer = setInterval(() => {
       refreshJobs()
@@ -130,6 +133,7 @@ export default function App() {
             games={games}
             maxWorkers={maxWorkers}
             quotaUntil={quotaUntil}
+            autoQueue={autoQueue}
             onOpenJob={setSelectedJobId}
             onChanged={refreshJobs}
             onGoSources={() => setView('sources')}

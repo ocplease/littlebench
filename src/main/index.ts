@@ -60,6 +60,7 @@ function registerIpc(): void {
   }))
   handle('settings:set', (s: Record<string, string>) => {
     for (const [k, v] of Object.entries(s)) setSetting(k, v)
+    broadcast('settings:changed', null)
     return true
   })
 
