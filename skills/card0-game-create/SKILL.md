@@ -43,6 +43,7 @@ Create a manifest file at `manifest.json` following the card0 schema v1. See `re
 - Each card must be a separate object with `quantity` >= 1.
 - Every deck must have a `name` and a `cards` array.
 - For round-based games, the deck's total card count should match the printed rules exactly. The English Desperate Oasis game uses 15 oasis cards because the rulebook has 3 rounds × 5 cards. Mirror that pattern for any round-based game.
+- **Tokens, coins, and other physical items are cards too.** If the game pack includes tokens, coins, markers, or any other loose items, represent each item type as a card in its **own dedicated deck** (e.g. a `tokenDeck` containing "Coin token", "Victory point token", etc., with `quantity` matching the physical count, or a suitable deck quantity if it's a large pile). Don't model them as a separate non-card entity — the manifest only knows decks and cards. A dedicated deck also matters downstream: each deck gets its own card back (Stage 5), so token cards should not share a back with the animal or score decks.
 - **Multi-language build**: if the user wants en + zh + ja at the same time, author all three manifests NOW (`manifest_en.json`, `manifest_zh.json`, `manifest_ja.json`) while the design is fresh. Translate name, description, rules, and every card's name/description; keep `value`, `quantity`, `type` identical across languages. See Stage 9 for the full parallel build flow.
 
 Write a Python validation step *before* you call the CLI:
@@ -86,9 +87,13 @@ Group card faces by:
 
 List the unique designs in `cards_plan.json` with: `id`, `value`, `name_en`, `name_zh`, `name_ja`, `ability_xx`, `color_theme`. This is your source of truth for prompts.
 
+**Exception — token/coin cards:** for cards that represent a physical token, coin, or marker (see Stage 2), generate just the **item's image** — a single coin, token, or marker illustration in the game's art style — not a framed card face with a value medallion, name banner, or ability text. The item image is uploaded as the card front with `--mode full_face` exactly like any other card. Token cards live in their own deck, so they also get their **own card back** (see below), not the animal/score deck's back.
+
 ### Card back - reuse first, generate only if necessary
 
 Every card also needs a **back** image (card0 takes it per card via `--face back`). Backs must be **textless and language-neutral** - an ornamental pattern, frame, or emblem, never title text - so one back serves every language version and every game with a similar theme. This is a deliberate token saver: image generation is the expensive stage.
+
+**Backs are per-deck.** Each deck needs its own back, and it can be a different one per deck within the same game — e.g. the animal deck gets `card_back.jpg`, the score deck gets `card_back_oasis.jpg`, a token deck gets `card_back_token.jpg`. The reuse-first workflow below applies to each deck independently.
 
 1. **Check the shared back library first.** The workbench prompt gives you its path (default: `<workbench-root>/assets/card-backs/`). Files are named by theme, e.g. `back_desert_arabesque.jpg`, `back_fantasy_ornate.jpg`.
 2. **If a back fits the game's theme, reuse it**: copy it into your workspace as `card_back.jpg` and skip generation entirely.
@@ -172,10 +177,10 @@ card0 card image upload --face front --mode full_face <cardId> compressed/<file>
 
 `--mode full_face` is the right default for full-card designs. Use `--mode artwork` only if you're sending an isolated illustration that card0 should compose with its built-in frame.
 
-After the fronts, upload the back to **every** card - it is the same `card_back.jpg` file for all of them:
+After the fronts, upload the back to **every** card - all cards in the same deck share that deck's back file (`card_back.jpg`, `card_back_oasis.jpg`, `card_back_token.jpg`, ... — one per deck, see Stage 5):
 
 ```bash
-card0 card image upload --face back --mode full_face <cardId> card_back.jpg
+card0 card image upload --face back --mode full_face <cardId> <card_back_for_this_deck>.jpg
 ```
 
 Run uploads in batches per deck (typically 5-15 uploads each) and capture timing. card0's image upload takes ~2-5s per card; budget at least 60s per 15-card deck (fronts + backs ≈ double that).
@@ -228,6 +233,7 @@ Done. Report the game IDs, the cover URL, and a summary of what was generated an
 - Seedream swaps the order of cards — the model often reorders. Verify each generated image against `cards_plan.json` before assuming the index matches the prompt.
 - Generated back image contains text — it was supposed to be textless. A back with rendered
   text cannot be reused across languages; regenerate or pick a different one from the library.
+- Cards in one deck end up with another deck's back — backs are per-deck (Stage 5). When uploading backs, group by deck and double-check you're passing that deck's back file, especially for token decks whose fronts are bare item images.
 - Card text on the image has typos — accept it for the in-game metadata is in the description, but mention the imperfection in the final report. Regenerating rarely fixes the same character.
 - `card0 game use --id` fails with "unknown option" — use positional `card0 game use <gameId>`, not the `--id` flag.
 - `card0 deck list` throws a SyntaxError in browser.js — pass `--game <gameId>` instead of relying on the active game context.
