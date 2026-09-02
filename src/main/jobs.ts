@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { execSync } from 'node:child_process'
-import { existsSync, readFileSync, readdirSync, mkdirSync, statSync, writeFileSync, unlinkSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, mkdirSync, statSync, writeFileSync, unlinkSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import { runAgent, AgentRun, ClaudeStreamEvent } from './agent-runner'
 import { detectStage } from './stages'
@@ -11,7 +11,7 @@ import { agentEnv, coolKey, claudeKeysAvailable, parseQuotaReset } from './keys'
 import { insertMessage } from './db'
 import {
   getJob, getSetting, setSetting, insertJob, listJobs, updateJob, appendEvent, upsertGame,
-  listEvents, JobRow
+  listEvents, deleteJobRows, JobRow
 } from './db'
 
 type Broadcast = (channel: string, payload: unknown) => void
@@ -558,6 +558,22 @@ export function discardJob(jobId: string): void {
       updateJob(child.id, { status: 'discarded', finished_at: new Date().toISOString() })
     }
   }
+  emit('jobs:changed', null)
+  pumpQueue()
+}
+
+/** Hard-delete a job: DB rows (events, artifacts, messages, games) AND its
+ *  workspace on disk. Children (localization jobs) go with it. Unlike
+ *  discard, this is unrecoverable - the board just forgets the job. */
+export function deleteJob(jobId: string): void {
+  const run = running.get(jobId)
+  if (run) run.kill()
+  clearLock(jobId)
+  for (const child of listJobs().filter((j) => j.parent_job_id === jobId)) {
+    deleteJob(child.id)
+  }
+  deleteJobRows(jobId)
+  rmSync(jobWorkspace(jobId), { recursive: true, force: true })
   emit('jobs:changed', null)
   pumpQueue()
 }

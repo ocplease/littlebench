@@ -225,6 +225,16 @@ export function deleteVideo(id: number): void {
   getDb().prepare('DELETE FROM videos WHERE id = ?').run(id)
 }
 
+/** Hard-delete a job: the row itself plus everything referencing it. */
+export function deleteJobRows(jobId: string): void {
+  const db = getDb()
+  db.prepare('DELETE FROM events WHERE job_id = ?').run(jobId)
+  db.prepare('DELETE FROM artifacts WHERE job_id = ?').run(jobId)
+  db.prepare('DELETE FROM messages WHERE job_id = ?').run(jobId)
+  db.prepare('DELETE FROM games WHERE job_id = ?').run(jobId)
+  db.prepare('DELETE FROM jobs WHERE id = ?').run(jobId)
+}
+
 export function updateVideoStatus(id: number, status: VideoStatus, reason: string | null): void {
   getDb().prepare('UPDATE videos SET status = ?, triage_reason = ? WHERE id = ?').run(status, reason, id)
 }

@@ -4,7 +4,7 @@ import { readFileSync, existsSync } from 'node:fs'
 import { ensureDirs, jobWorkspace, workbenchRoot } from './paths'
 import { installSkills } from './skills'
 import { getDb, getSetting, setSetting, listVideos, listJobs, getJob, listGames, listArtifactsByJob, listMessages, listForemanMessages } from './db'
-import { setBroadcast, setShuttingDown, createJob, startJob, stopJob, pauseJob, resumeJob, approveJob, syncJobStatus, discardJob, restartJob, steerJob, jobEventsFromDb, listArtifacts, recoverInterrupted, pumpQueue, openGame, jobIsLive } from './jobs'
+import { setBroadcast, setShuttingDown, createJob, startJob, stopJob, pauseJob, resumeJob, approveJob, syncJobStatus, discardJob, deleteJob, restartJob, steerJob, jobEventsFromDb, listArtifacts, recoverInterrupted, pumpQueue, openGame, jobIsLive } from './jobs'
 import { ingestChannel, scoutVideos, deepScoutVideo } from './ingest'
 import { updateVideoStatus, updateVideoScout, deleteVideo } from './db'
 import { setForemanBroadcast, sendForeman, foremanBusy, resetForeman } from './foreman'
@@ -156,6 +156,10 @@ function registerIpc(): void {
   handle('jobs:syncStatus', (id: string) => syncJobStatus(id))
   handle('jobs:discard', (id: string) => {
     discardJob(id)
+    return true
+  })
+  handle('jobs:delete', (id: string) => {
+    deleteJob(id)
     return true
   })
   handle('jobs:restart', (id: string) => {

@@ -77,6 +77,7 @@ export default function Sources({ videos, onChanged, onChangedJobs }: Props) {
   }
 
   const removeSelected = async () => {
+    if (!window.confirm(`Delete ${selected.size} video${selected.size === 1 ? '' : 's'} from sources?`)) return
     for (const id of selected) await window.api.deleteVideo(id)
     setSelected(new Set())
     onChanged()
@@ -89,6 +90,12 @@ export default function Sources({ videos, onChanged, onChangedJobs }: Props) {
       else next.add(id)
       return next
     })
+  }
+
+  const allSelected = videos.length > 0 && videos.every((v) => selected.has(v.id))
+
+  const toggleAll = () => {
+    setSelected(allSelected ? new Set() : new Set(videos.map((v) => v.id)))
   }
 
   useEffect(() => {
@@ -130,7 +137,14 @@ export default function Sources({ videos, onChanged, onChangedJobs }: Props) {
       <table className="video-table">
         <thead>
           <tr>
-            <th />
+            <th>
+              <input
+                type="checkbox"
+                title={allSelected ? 'Deselect all' : 'Select all'}
+                checked={allSelected}
+                onChange={toggleAll}
+              />
+            </th>
             <th>Video</th>
             <th>Classification</th>
             <th>Card0 fit</th>

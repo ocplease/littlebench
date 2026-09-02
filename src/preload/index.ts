@@ -25,6 +25,7 @@ const api: WorkbenchApi = {
   resumeJob: (id) => ipcRenderer.invoke('jobs:resume', id),
   approveJob: (id) => ipcRenderer.invoke('jobs:approve', id),
   discardJob: (id) => ipcRenderer.invoke('jobs:discard', id),
+  deleteJob: (id) => ipcRenderer.invoke('jobs:delete', id),
   restartJob: (id) => ipcRenderer.invoke('jobs:restart', id),
   jobEvents: (id) => ipcRenderer.invoke('jobs:events', id),
   localizeJob: (jobId, language) => ipcRenderer.invoke('jobs:localize', jobId, language),

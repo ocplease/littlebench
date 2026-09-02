@@ -43,6 +43,7 @@ function Column<T>({ title, className, items, empty, render }: {
 
 /** Linear-style board: the agent company at a glance. */
 export default function Factory({ jobs, videos, games, maxWorkers, quotaUntil, keyPool, autoQueue, onOpenJob, onChanged, onGoSources }: Props) {
+  const [selected, setSelected] = useState<Set<string>>(new Set())
   const active = jobs.filter((j) => j.status === 'running')
   const building = jobs.filter((j) => j.status === 'running' || j.status === 'paused')
   const queued = jobs.filter((j) => j.status === 'queued')
@@ -52,6 +53,27 @@ export default function Factory({ jobs, videos, games, maxWorkers, quotaUntil, k
   const quotaPaused = quotaUntil && new Date(quotaUntil) > new Date()
 
   const videoById = new Map(videos.map((v) => [v.id, v]))
+
+  /** Jobs that live on the board (everything except published/discarded). */
+  const boardJobs = jobs.filter((j) => j.status !== 'submitted' && j.status !== 'discarded')
+  const allSelected = boardJobs.length > 0 && boardJobs.every((j) => selected.has(j.id))
+
+  const toggleSelect = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const deleteSelected = async () => {
+    const n = selected.size
+    if (!n) return
+    if (!window.confirm(`Delete ${n} job${n === 1 ? '' : 's'}? This removes the jobs from the board together with their workspaces and artifacts - unrecoverable.`)) return
+    for (const id of selected) await window.api.deleteJob(id)
+    setSelected(new Set())
+  }
 
   /** Pause = stop every running builder and hold the queue (jobs stay parked,
    *  restartable from their cards). Resume lets pumpQueue fill the slots again. */
@@ -82,7 +104,24 @@ export default function Factory({ jobs, videos, games, maxWorkers, quotaUntil, k
             {autoQueue ? '⏸ Pause' : '▶ Resume queue'}
           </button>
         )}
+        {boardJobs.length > 0 && (
+          <button
+            className="small-btn"
+            title="Select every job on the board (queued, building, review)"
+            onClick={() => setSelected(allSelected ? new Set() : new Set(boardJobs.map((j) => j.id)))}
+          >
+            {allSelected ? 'Deselect all' : 'Select all'}
+          </button>
+        )}
       </div>
+
+      {selected.size > 0 && (
+        <div className="selection-bar factory-selection">
+          {selected.size} selected
+          <button className="danger" onClick={deleteSelected}>Delete selected</button>
+          <button className="link" onClick={() => setSelected(new Set())}>clear</button>
+        </div>
+      )}
 
       {!autoQueue && !quotaPaused && (
         <div className="quota-note">Queue is paused - no new builds start until you resume.</div>
@@ -119,7 +158,7 @@ export default function Factory({ jobs, videos, games, maxWorkers, quotaUntil, k
           items={queued}
           empty="Queue is empty."
           render={(j, i) => (
-            <JobCard key={j.id} job={j} video={j.video_id ? videoById.get(j.video_id) : undefined} workerHint={active.length + i + 1} onOpen={onOpenJob} />
+            <JobCard key={j.id} job={j} video={j.video_id ? videoById.get(j.video_id) : undefined} workerHint={active.length + i + 1} onOpen={onOpenJob} onChanged={onChanged} selected={selected.has(j.id)} onToggleSelect={toggleSelect} />
           )}
         />
 
@@ -129,7 +168,7 @@ export default function Factory({ jobs, videos, games, maxWorkers, quotaUntil, k
           items={building}
           empty="No active builders."
           render={(j) => (
-            <JobCard key={j.id} job={j} video={j.video_id ? videoById.get(j.video_id) : undefined} onOpen={onOpenJob} />
+            <JobCard key={j.id} job={j} video={j.video_id ? videoById.get(j.video_id) : undefined} onOpen={onOpenJob} onChanged={onChanged} selected={selected.has(j.id)} onToggleSelect={toggleSelect} />
           )}
         />
 
@@ -138,7 +177,7 @@ export default function Factory({ jobs, videos, games, maxWorkers, quotaUntil, k
           className="col-review"
           items={review}
           empty="Nothing to review."
-          render={(j) => <JobCard key={j.id} job={j} video={j.video_id ? videoById.get(j.video_id) : undefined} onOpen={onOpenJob} />}
+          render={(j) => <JobCard key={j.id} job={j} video={j.video_id ? videoById.get(j.video_id) : undefined} onOpen={onOpenJob} onChanged={onChanged} selected={selected.has(j.id)} onToggleSelect={toggleSelect} />}
         />
 
         <Column
@@ -173,7 +212,15 @@ function stageProgress(job: Job): number {
   return i < 0 ? 0 : i + (job.status === 'running' || job.status === 'paused' ? 0 : 1)
 }
 
-function JobCard({ job, video, workerHint, onOpen }: { job: Job; video?: Video; workerHint?: number; onOpen: (id: string) => void }) {
+function JobCard({ job, video, workerHint, onOpen, onChanged, selected, onToggleSelect }: {
+  job: Job
+  video?: Video
+  workerHint?: number
+  onOpen: (id: string) => void
+  onChanged: () => void
+  selected: boolean
+  onToggleSelect: (id: string) => void
+}) {
   const progress = stageProgress(job)
   const [pausing, setPausing] = useState(false)
   const imperfections = (() => {
@@ -197,6 +244,14 @@ function JobCard({ job, video, workerHint, onOpen }: { job: Job; video?: Video; 
     }
   }
 
+  /** Hard-delete: job rows + workspace, unrecoverable. */
+  const del = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!window.confirm(`Delete "${job.title}"? Its workspace and artifacts are removed - unrecoverable.`)) return
+    await window.api.deleteJob(job.id)
+    onChanged()
+  }
+
   return (
     <article
       className={`issue-card status-${job.status}`}
@@ -206,6 +261,14 @@ function JobCard({ job, video, workerHint, onOpen }: { job: Job; video?: Video; 
       onKeyDown={(e) => e.key === 'Enter' && onOpen(job.id)}
     >
       <div className="issue-top">
+        <input
+          type="checkbox"
+          className="card-select"
+          title="Select for bulk actions"
+          checked={selected}
+          onClick={(e) => e.stopPropagation()}
+          onChange={() => onToggleSelect(job.id)}
+        />
         <Thumb video={video} fallback={job.title} />
         <div className="issue-meta">
           <div className="issue-title">{job.title}</div>
@@ -224,6 +287,13 @@ function JobCard({ job, video, workerHint, onOpen }: { job: Job; video?: Video; 
             {pausing ? '…' : job.status === 'running' ? '⏸' : '▶'}
           </button>
         )}
+        <button
+          className="icon-btn del-btn"
+          title="Delete this job (removes its workspace - unrecoverable)"
+          onClick={del}
+        >
+          ✕
+        </button>
       </div>
 
       {(job.status === 'running' || job.status === 'paused') && (

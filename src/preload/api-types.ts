@@ -131,6 +131,7 @@ export interface WorkbenchApi {
   resumeJob(id: string): Promise<boolean>
   approveJob(id: string): Promise<ApproveResult>
   discardJob(id: string): Promise<boolean>
+  deleteJob(id: string): Promise<boolean>
   restartJob(id: string): Promise<boolean>
   jobEvents(id: string): Promise<unknown[]>
   localizeJob(jobId: string, language: string): Promise<string | null>
