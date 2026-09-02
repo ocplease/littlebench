@@ -60,7 +60,7 @@ All artifacts land in a known place — that's what the gallery watcher and revi
 - `claude` → `/Users/shuulin/.local/bin/claude` (v2.1.239 ✓)
 - `yt-dlp` → `/Users/shuulin/miniforge3/bin/yt-dlp` (✓) — also fetches transcripts
 - `card0` → `/usr/local/bin/card0` (v0.2.2 ✓)
-- Seedream skill lives in `~/.claude/skills/` — available to headless sessions automatically. **The Ark API key must be present in the spawned env** (read from `~/.zshrc`/`.zshenv` at app start, or store in settings).
+- Skills live in the card0 repo (`~/Projects/card0/card0/skills/`, override with `CARD0_SKILLS_DIR`). The workbench symlinks them into every job workspace (`.claude/skills/`) and the workbench root, so headless sessions get them as project-level skills. **The Ark API key must be present in the spawned env** (read from `~/.zshrc`/`.zshenv` at app start, or store in settings).
 
 ---
 

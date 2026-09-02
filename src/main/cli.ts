@@ -176,7 +176,7 @@ async function main(): Promise<void> {
         'Do ONLY these steps, quickly (no image generation, no card0 calls):',
         '1. Fetch the video transcript (yt-dlp auto-subs or similar).',
         '2. Write a minimal manifest.json for a small 2-deck game following the',
-        '   card0-game-create skill Stage 2 (schema v1, language "en").',
+        '   card0-game skill, Stage 2 of card0-game-create (schema v1, language "en").',
         '3. Verify the manifest JSON parses with python3. Do NOT run card0 game validate.',
         '4. Write result.json in this directory exactly:',
         '   {"gameId":"dryrun-test","gameName":"Dry Run Game","cardCount":4,',

@@ -1,6 +1,6 @@
 # littlebench
 
-A Mac desktop app (Electron + React) that runs an autonomous card-game factory: point it at a YouTube channel, a scout agent scores which videos can become games, and up to three concurrent Claude Code builder sessions turn them into card0 games using the `card0-game-create` skill - with a Linear-style board to watch it all happen and human gates before anything is published.
+A Mac desktop app (Electron + React) that runs an autonomous card-game factory: point it at a YouTube channel, a scout agent scores which videos can become games, and up to three concurrent Claude Code builder sessions turn them into card0 games using the `card0-game` skill family - with a Linear-style board to watch it all happen and human gates before anything is published.
 
 The workbench owns orchestration and state; Claude owns execution. See `PLAN.md` for the architecture.
 
@@ -42,10 +42,10 @@ npm run typecheck
 - `claude` CLI logged in (`claude login`) - the agent runs on your Claude subscription
 - `yt-dlp` on PATH (channel ingest + transcripts)
 - `card0` CLI logged in (`card0 login`) - game creation/upload/submit
-- The skills from `skills/` installed into `~/.claude/skills/` (agents load user-level skills):
+- The skills live in the card0 repo (`~/Projects/card0/card0/skills/`: `card0-game` umbrella + `card0-game-create`, `card0-cli`, `byted-ark-seedream-skill`; override with `CARD0_SKILLS_DIR`). The workbench symlinks every skill it finds there into each job workspace (`.claude/skills/`) and the workbench root automatically - no install step. For interactive sessions, symlink them once:
 
   ```bash
-  cp -R skills/card0-game-create skills/byted-ark-seedream-skill ~/.claude/skills/
+  ln -s ~/Projects/card0/card0/skills/{card0-game,card0-game-create,byted-ark-seedream-skill} ~/.claude/skills/
   ```
 
 - The Seedream skill + Ark API key in your shell env (card art generation)

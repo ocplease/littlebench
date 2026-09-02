@@ -5,6 +5,7 @@ import path from 'node:path'
 import { runAgent, AgentRun, ClaudeStreamEvent } from './agent-runner'
 import { detectStage } from './stages'
 import { jobWorkspace, backLibraryDir, CARD0_BIN, shellEnv } from './paths'
+import { installSkills } from './skills'
 import { parseProtocol, applyProtocol, PROTOCOL_CONTRACT } from './protocol'
 import { agentEnv, coolKey, claudeKeysAvailable, parseQuotaReset } from './keys'
 import { insertMessage } from './db'
@@ -123,7 +124,8 @@ export function buildGamePrompt(job: JobRow): string {
     'You are running inside an automated workbench. Create a card0 game from this video:',
     `${job.youtube_url}  (title: "${job.title}")`,
     '',
-    '- Follow the card0-game-create skill exactly, Stages 1 through 8 and Stage 10 reporting.',
+    '- Follow the card0-game skill (it dispatches to card0-game-create for the build): run its',
+    '  Stages 1 through 8 and Stage 10 reporting.',
     '- Build the ENGLISH version only. Do not localize.',
     '- Work inside the current directory (this is your job workspace).',
     '- CRITICAL: Do NOT run `card0 game submit`. A human reviews the cards first.',
@@ -155,7 +157,8 @@ export function buildLocalizePrompt(parent: JobRow, language: 'zh-Hans' | 'ja'):
     `  shared library at ${backLibraryDir()}; only if that is empty too, generate one textless`,
     `  back and cp it into the library so other games reuse it.`,
     '',
-    `Follow the card0-game-create skill, Stage 9 "If localizing after the fact": translate the manifest`,
+    `Follow the card0-game skill's localization flow (card0-game-create Stage 9 "If localizing`,
+    `after the fact"): translate the manifest`,
     `into ${langName} (language code "${language}"), create a NEW card0 game, regenerate ALL artwork`,
     `with ${langName} text rendered on the images, and upload everything.`,
     '- Work inside the current directory (this is your job workspace).',
@@ -257,6 +260,7 @@ export function executeJobWithPrompt(
   const workspace = jobWorkspace(jobId)
   mkdirSync(workspace, { recursive: true })
   mkdirSync(path.join(workspace, '.workbench'), { recursive: true })
+  installSkills(workspace) // project-level skills for the headless session
 
   const model = getSetting('model', '')
   const bypass = getSetting('bypassPermissions', 'true') === 'true'

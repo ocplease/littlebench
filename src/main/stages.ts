@@ -132,6 +132,10 @@ export function detectStage(event: ClaudeStreamEvent): StageUpdate | null {
   if ((tool.name === 'Write' || tool.name === 'Edit') && input.includes('cards_plan')) {
     return { stage: 'plan', detail: 'Planning unique designs' }
   }
-  if (tool.name === 'Skill') return { stage: 'art', detail: 'Generating art' }
+  // Only image-generation skill invocations mean art; other Skill calls
+  // (card0-game, card0-cli, card0-game-create) are not stage transitions.
+  if (tool.name === 'Skill' && /seedream|byted/i.test(input)) {
+    return { stage: 'art', detail: 'Generating art' }
+  }
   return null
 }

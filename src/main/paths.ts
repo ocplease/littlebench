@@ -79,6 +79,25 @@ export function backLibraryDir(): string {
   return path.join(workbenchRoot(), 'assets', 'card-backs')
 }
 
+/** Managed skills dir (the card0 repo's skills/). Skills are symlinked into
+ *  each job workspace and the workbench root so spawned headless claude
+ *  sessions discover them as project-level skills.
+ *  Override with CARD0_SKILLS_DIR (handy for tests/relocation). */
+export function skillsDir(): string {
+  if (process.env.CARD0_SKILLS_DIR) return process.env.CARD0_SKILLS_DIR
+  const candidates = [
+    // sibling of the workbench root (default layout: ~/Projects/card0/{card0,card0-workbench})
+    path.join(path.dirname(workbenchRoot()), 'card0', 'skills'),
+    // sibling repo next to agent-works itself
+    path.join(repoRoot(), '..', 'card0', 'skills'),
+    // canonical fallback
+    path.join(homedir(), 'Projects/card0/card0', 'skills')
+  ]
+  // probe a known skill so an empty leftover dir doesn't win
+  for (const c of candidates) if (existsSync(path.join(c, 'card0-cli', 'SKILL.md'))) return c
+  return candidates[0]
+}
+
 export function dbPath(): string {
   return path.join(workbenchRoot(), 'workbench.db')
 }
