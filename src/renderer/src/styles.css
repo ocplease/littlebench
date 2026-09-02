@@ -1006,5 +1006,6 @@ input[type='checkbox'] { transform: scale(1.2); }
 .del-btn:hover { color: var(--accent-red); border-color: var(--accent-red); }
 
 .card-select { flex-shrink: 0; margin-top: 4px; cursor: pointer; }
+.col-select { margin-top: 0; }
 
 .factory-selection { margin: 12px 24px 0; }

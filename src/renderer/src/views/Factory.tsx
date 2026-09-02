@@ -16,20 +16,34 @@ interface Props {
   onGoSources: () => void
 }
 
-/** Board column: shows the first `initial` items, then expands in +5 steps. */
-function Column<T>({ title, className, items, empty, render }: {
+/** Board column: shows the first `initial` items, then expands in +5 steps.
+ *  Job columns pass `selection` to get a select-all checkbox in the header. */
+function Column<T>({ title, className, items, empty, render, selection }: {
   title: string
   className?: string
   items: T[]
   empty: ReactNode
   render: (item: T, index: number) => ReactNode
+  selection?: { ids: string[]; selected: Set<string>; toggleAll: (ids: string[]) => void }
 }) {
   const [limit, setLimit] = useState(10)
   const visible = items.slice(0, limit)
   const hidden = items.length - visible.length
+  const allSelected = !!selection && selection.ids.length > 0 && selection.ids.every((id) => selection.selected.has(id))
   return (
     <section className={`board-col ${className ?? ''}`}>
-      <header>{title} <span className="col-count">{items.length}</span></header>
+      <header>
+        {selection && (
+          <input
+            type="checkbox"
+            className="card-select col-select"
+            title="Select all in this column"
+            checked={allSelected}
+            onChange={() => selection.toggleAll(selection.ids)}
+          />
+        )}
+        {title} <span className="col-count">{items.length}</span>
+      </header>
       {items.length === 0 && <div className="board-empty">{empty}</div>}
       {visible.map(render)}
       {hidden > 0 && (
@@ -54,15 +68,21 @@ export default function Factory({ jobs, videos, games, maxWorkers, quotaUntil, k
 
   const videoById = new Map(videos.map((v) => [v.id, v]))
 
-  /** Jobs that live on the board (everything except published/discarded). */
-  const boardJobs = jobs.filter((j) => j.status !== 'submitted' && j.status !== 'discarded')
-  const allSelected = boardJobs.length > 0 && boardJobs.every((j) => selected.has(j.id))
-
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
       else next.add(id)
+      return next
+    })
+  }
+
+  /** Select-all toggle for one column: clears when the column is already fully selected. */
+  const toggleColumn = (ids: string[]) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (ids.every((id) => next.has(id))) ids.forEach((id) => next.delete(id))
+      else ids.forEach((id) => next.add(id))
       return next
     })
   }
@@ -102,15 +122,6 @@ export default function Factory({ jobs, videos, games, maxWorkers, quotaUntil, k
         {(building.length > 0 || !autoQueue) && (
           <button className={`small-btn pause-toggle ${autoQueue ? '' : 'paused'}`} onClick={togglePause}>
             {autoQueue ? '⏸ Pause' : '▶ Resume queue'}
-          </button>
-        )}
-        {boardJobs.length > 0 && (
-          <button
-            className="small-btn"
-            title="Select every job on the board (queued, building, review)"
-            onClick={() => setSelected(allSelected ? new Set() : new Set(boardJobs.map((j) => j.id)))}
-          >
-            {allSelected ? 'Deselect all' : 'Select all'}
           </button>
         )}
       </div>
@@ -157,6 +168,7 @@ export default function Factory({ jobs, videos, games, maxWorkers, quotaUntil, k
           title="Queued"
           items={queued}
           empty="Queue is empty."
+          selection={{ ids: queued.map((j) => j.id), selected, toggleAll: toggleColumn }}
           render={(j, i) => (
             <JobCard key={j.id} job={j} video={j.video_id ? videoById.get(j.video_id) : undefined} workerHint={active.length + i + 1} onOpen={onOpenJob} onChanged={onChanged} selected={selected.has(j.id)} onToggleSelect={toggleSelect} />
           )}
@@ -167,6 +179,7 @@ export default function Factory({ jobs, videos, games, maxWorkers, quotaUntil, k
           className="col-building"
           items={building}
           empty="No active builders."
+          selection={{ ids: building.map((j) => j.id), selected, toggleAll: toggleColumn }}
           render={(j) => (
             <JobCard key={j.id} job={j} video={j.video_id ? videoById.get(j.video_id) : undefined} onOpen={onOpenJob} onChanged={onChanged} selected={selected.has(j.id)} onToggleSelect={toggleSelect} />
           )}
@@ -177,6 +190,7 @@ export default function Factory({ jobs, videos, games, maxWorkers, quotaUntil, k
           className="col-review"
           items={review}
           empty="Nothing to review."
+          selection={{ ids: review.map((j) => j.id), selected, toggleAll: toggleColumn }}
           render={(j) => <JobCard key={j.id} job={j} video={j.video_id ? videoById.get(j.video_id) : undefined} onOpen={onOpenJob} onChanged={onChanged} selected={selected.has(j.id)} onToggleSelect={toggleSelect} />}
         />
 
