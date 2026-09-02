@@ -400,6 +400,7 @@ function finalizeJob(jobId: string, result: ClaudeStreamEvent): void {
 function queueLocalizations(parent: JobRow): void {
   if (getSetting('autoLocalize', 'true') !== 'true') return
   if (parent.language !== 'en') return
+  if (parent.title.endsWith('(DRY RUN)')) return // test builds never localize
   const existing = listJobs().filter((j) => j.parent_job_id === parent.id)
   let added = false
   for (const lang of ['zh-Hans', 'ja'] as const) {
