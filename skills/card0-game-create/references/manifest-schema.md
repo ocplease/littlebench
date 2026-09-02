@@ -25,6 +25,9 @@ The `manifest.json` file is the source of truth for a card0 game. `card0 game va
 | `setting` | string | recommended | One or two words (e.g. `"desert"`, `"oasis"`). |
 | `mechanic` | string[] | recommended | Free-form tags (e.g. `["drafting", "set collection"]`). |
 | `vibe` | string | recommended | One word tone (e.g. `"tense"`, `"cozy"`). |
+| `categoryTags` | string[] | **submission** | 1-3 canonical categories: Party, Family, Strategy, Educational, Puzzle, Social Deduction, Role-playing, Trivia, Kids, Casual. |
+| `mechanicTags` | string[] | **submission** | 1-3 canonical mechanics: Drafting, Bluffing, Set Collection, Memory, Storytelling, Push-your-luck, Cooperative, Dexterity, Matching, Resource Management. |
+| `estimatedMinutes` | int | **submission** | Estimated play time, 1-480. |
 
 ## `decks` array
 
@@ -62,7 +65,10 @@ Each card is an object with:
     "theme": "animals",
     "setting": "desert",
     "mechanic": ["drafting", "set collection", "hand management"],
-    "vibe": "tense"
+    "vibe": "tense",
+    "categoryTags": ["Family", "Strategy"],
+    "mechanicTags": ["Drafting", "Set Collection"],
+    "estimatedMinutes": 20
   },
   "decks": [
     {
