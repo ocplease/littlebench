@@ -55,14 +55,31 @@ export function sendForeman(message: string): { ok: boolean; error?: string } {
   broadcast('foreman:event', { type: 'user', text: message })
 
   let answer = ''
+  // The chat UI shows a Codex-style process feed: thinking, tool calls, and
+  // tool results stream in as they happen instead of a bare "working…".
   const captureText = (event: ClaudeStreamEvent) => {
-    if (event.type !== 'assistant') return
+    if (event.type !== 'assistant' && event.type !== 'user') return
     const content = (event.message as { content?: unknown } | undefined)?.content
     if (!Array.isArray(content)) return
-    for (const b of content as Array<{ type?: string; text?: string }>) {
-      if (b.type === 'text' && b.text) {
+    for (const b of content as Array<Record<string, unknown>>) {
+      if (b.type === 'text' && typeof b.text === 'string') {
+        if (event.type !== 'assistant') continue
+        if (!b.text) continue
         answer += (answer ? '\n\n' : '') + b.text
         broadcast('foreman:event', { type: 'delta', text: b.text })
+      } else if (b.type === 'thinking' && typeof b.thinking === 'string' && b.thinking) {
+        broadcast('foreman:event', { type: 'thinking', text: b.thinking.slice(0, 2000) })
+      } else if (b.type === 'tool_use' && typeof b.name === 'string') {
+        const input = b.input as Record<string, unknown> | undefined
+        // Bash carries the command in input.command - that is the thing to show.
+        const label = input && typeof input.command === 'string' ? input.command : b.name
+        broadcast('foreman:event', { type: 'tool', label, detail: summarizeJson(b.input, 4000) })
+      } else if (b.type === 'tool_result') {
+        broadcast('foreman:event', {
+          type: 'tool_result',
+          error: Boolean(b.is_error),
+          detail: summarizeResult(b.content)
+        })
       }
     }
   }
@@ -120,4 +137,25 @@ function lbEnv(): Record<string, string> {
 export function resetForeman(): void {
   setSetting('foreman_session_id', '')
   broadcast('foreman:event', { type: 'reset' })
+}
+
+function summarizeJson(value: unknown, max: number): string {
+  try {
+    return (JSON.stringify(value, null, 2) ?? '').slice(0, max)
+  } catch {
+    return String(value).slice(0, max)
+  }
+}
+
+/** Tool results are a string or an array of content blocks; flatten to text. */
+function summarizeResult(content: unknown): string {
+  let text = ''
+  if (typeof content === 'string') {
+    text = content
+  } else if (Array.isArray(content)) {
+    text = content
+      .map((c) => (c && typeof c === 'object' && 'text' in c ? String((c as { text: unknown }).text) : ''))
+      .join('\n')
+  }
+  return text.slice(0, 4000)
 }

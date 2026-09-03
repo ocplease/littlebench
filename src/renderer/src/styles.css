@@ -935,6 +935,48 @@ input[type='checkbox'] { transform: scale(1.2); }
 }
 @keyframes blink { 50% { opacity: 0; } }
 
+/* Live process feed: the foreman's thinking + tool calls, Codex-style. */
+.chat-process, .chat-process-done {
+  align-self: flex-start; max-width: 720px; width: 100%;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.chat-process-head {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11px; color: var(--text-muted); padding: 0 4px;
+}
+.cp-row summary {
+  display: flex; align-items: baseline; gap: 8px; cursor: pointer;
+  padding: 3px 4px; border-radius: 6px; list-style: none;
+  font-size: 12px; color: var(--text-muted);
+}
+.cp-row summary::-webkit-details-marker { display: none; }
+.cp-row summary:hover { background: var(--bg-raised); color: var(--text); }
+.cp-badge {
+  flex-shrink: 0; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em;
+  padding: 1px 6px; border-radius: 4px;
+  background: var(--bg-raised); border: 1px solid var(--border); color: var(--text-muted);
+}
+.cp-thinking .cp-badge { border-color: rgba(188, 140, 255, 0.4); color: #bc8cff; }
+.cp-tool .cp-badge { border-color: rgba(88, 166, 255, 0.4); color: #58a6ff; }
+.cp-result .cp-badge { border-color: var(--border); color: var(--text-muted); }
+.cp-result.error .cp-badge { border-color: rgba(248, 81, 73, 0.4); color: var(--accent-red); }
+.cp-line {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 11.5px;
+}
+.cp-row pre {
+  margin: 2px 0 6px; padding: 8px 10px; border-radius: 8px;
+  background: var(--bg); border: 1px solid var(--border);
+  font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; word-break: break-word;
+  max-height: 260px; overflow-y: auto;
+}
+.chat-process-done summary {
+  cursor: pointer; font-size: 11.5px; color: var(--text-muted); padding: 2px 4px;
+  list-style: none; user-select: none;
+}
+.chat-process-done summary::-webkit-details-marker { display: none; }
+.chat-process-done summary:hover { color: var(--text); }
+
 .chat-input {
   display: flex; gap: 10px; align-items: flex-end;
   padding: 14px 24px 18px; border-top: 1px solid var(--border);
