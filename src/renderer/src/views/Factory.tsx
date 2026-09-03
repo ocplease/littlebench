@@ -246,13 +246,14 @@ function JobCard({ job, video, workerHint, onOpen, onChanged, selected, onToggle
     }
   })()
 
-  /** Stop this build and hold the queue so nothing else fires up in its place. */
+  /** Pause this build and hold the queue so nothing else fires up in its place.
+   *  pauseJob (not stopJob): the card stays in Building with a Paused chip. */
   const pauseBuild = async (e: React.MouseEvent) => {
     e.stopPropagation()
     setPausing(true)
     try {
       await window.api.setSettings({ autoQueue: 'false' })
-      await window.api.stopJob(job.id)
+      await window.api.pauseJob(job.id)
     } finally {
       setPausing(false)
     }
