@@ -229,9 +229,10 @@ export function startJob(jobId: string): void {
   if (!job || job.status === 'running' || running.has(jobId)) return
   if (liveRunCount(jobId) >= maxWorkers()) return // all worker slots busy
 
-  // A paused build resumes its own session: the agent picks up where it
-  // stopped instead of redoing completed stages.
-  if (job.status === 'paused' && job.session_id) {
+  // Any job that already has a session resumes it: the agent picks up where it
+  // stopped instead of redoing completed stages. Covers both an explicit pause
+  // and a build parked back in the queue mid-run.
+  if (job.session_id) {
     executeJobWithPrompt(jobId, buildResumePrompt(), { resumeSessionId: job.session_id })
     return
   }
@@ -270,8 +271,11 @@ export function pauseJob(jobId: string): void {
 export function resumeJob(jobId: string): void {
   const job = getJob(jobId)
   if (!job || job.status !== 'paused') return
-  updateJob(jobId, { status: 'queued', error: null })
-  startJob(jobId)
+  updateJob(jobId, { error: null })
+  startJob(jobId) // resumes the session (startJob branches on session_id)
+  // All worker slots busy? Park it in the queue; pumpQueue resumes it later.
+  const after = getJob(jobId)
+  if (after && after.status === 'paused') updateJob(jobId, { status: 'queued' })
   emit('jobs:changed', null)
 }
 
@@ -313,8 +317,9 @@ export function executeJobWithPrompt(
     model: model || undefined,
     env: Object.keys(keyEnv).length ? keyEnv : undefined,
     bypassPermissions: bypass,
-    sessionId: opts.resumeSessionId ? undefined : (job.session_id ?? undefined),
-    resumeSessionId: opts.resumeSessionId,
+    // A job that already has a session always resumes it (--resume) - passing
+    // its id via --session-id would collide ("Session ID already in use").
+    resumeSessionId: opts.resumeSessionId ?? (job.session_id ?? undefined),
     onEvent: (event) => {
       // Noise filter: thinking-token streams (thousands per job), hook chatter and
       // tool progress are not worth persisting or shipping over IPC.

@@ -24,7 +24,7 @@ import { getDb, getJob, listJobs, listVideos, updateVideoStatus, VideoRow } from
 import {
   createJob, startJob, executeJobWithPrompt, jobEventsFromDb, recoverInterrupted, jobIsLive
 } from './jobs'
-import { ingestChannel, scoutVideos, fetchVideoTitle } from './ingest'
+import { ingestChannel, scoutVideos, fetchVideoTitle, looksLikeVideoUrl } from './ingest'
 
 const TERMINAL = new Set(['awaiting_review', 'submitted', 'failed', 'interrupted', 'discarded'])
 
@@ -159,7 +159,7 @@ async function main(): Promise<void> {
     }
     case 'queue-url': {
       const [url, ...titleParts] = rest
-      if (!url) throw new Error('usage: queue-url <youtube-url> ["<title>"]')
+      if (!url || !looksLikeVideoUrl(url)) throw new Error('usage: queue-url <youtube-url> ["<title>"] - url must be a YouTube video link')
       // No title given: look it up so the board shows the real video name.
       const title = titleParts.join(' ') || (await fetchVideoTitle(url)) || url
       const id = createJob({ title, youtube_url: url, autostart: false })

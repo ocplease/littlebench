@@ -67,11 +67,19 @@ export async function fetchVideoTitle(url: string): Promise<string | null> {
       ['--no-playlist', '--print', '%(title)s', normalizeChannelUrl(url)],
       { encoding: 'utf8', env: shellEnv(), timeout: 120_000 }
     )
-    const title = stdout.trim().split('\n')[0]?.trim()
-    return title || null
+    const title = stdout.trim().split('\n')[0]?.trim() ?? ''
+    // yt-dlp prints usage to stdout with exit 0 for flag-like args (--help);
+    // a real title is one sane line.
+    if (!title || /^Usage:/i.test(title) || title.length > 300) return null
+    return title
   } catch {
     return null
   }
+}
+
+/** Cheap shape check so '--help' or prose never becomes a video URL. */
+export function looksLikeVideoUrl(url: string): boolean {
+  return /^https?:\/\/(www\.|m\.)?(youtube\.com\/(watch\?v=|shorts\/|live\/)|youtu\.be\/)\S+/i.test(url.trim())
 }
 
 /** A bare channel URL (@handle, /channel/ID, /c/..., /user/...) resolves to a
