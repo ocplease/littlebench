@@ -120,6 +120,34 @@ const NO_IMAGE_INPUT = [
 ].join('\n')
 
 export function buildGamePrompt(job: JobRow): string {
+  // Design-brief job (no video): the human already specified the game in
+  // design_brief.md in the workspace - build straight from that.
+  if (!job.youtube_url) {
+    return [
+      'You are running inside an automated workbench. Build a card0 game from the design brief',
+      'in design_brief.md in the current directory (your job workspace). Read it FIRST and follow',
+      'it exactly - the human designed this game themselves; do not redesign it.',
+      '',
+      '- Follow the card0-game skill (it dispatches to card0-game-create for the build): run its',
+      '  Stages 1 through 8 and Stage 10 reporting, skipping the video-transcript stage.',
+      '- Build the ENGLISH version only. Do not localize.',
+      '- Work inside the current directory (this is your job workspace).',
+      '- CRITICAL: Do NOT run `card0 game submit`. A human reviews the cards first.',
+      '- When finished, write result.json in this directory with shape:',
+      '  { "gameId": string, "deckIds": { "animals": string, "oasis": string },',
+      '    "gameName": string, "cardCount": number, "uploadedCount": number,',
+      '    "coverPath": string, "imperfections": string[], "notes": string }',
+      '  (omit deckIds keys that do not apply to this game)',
+      '- Use the byted-ark-seedream-skill for all image generation; save generated art under',
+      '  this workspace (cards_raw/ for PNGs, compressed/ for JPEGs).',
+      '- Card backs: every card needs one (card0 --face back). REUSE FIRST: pick a textless back',
+      `  from the shared library at ${backLibraryDir()} and copy it to card_back.jpg in this`,
+      '  workspace. Only generate a new back if none fits the theme - and then also cp the new',
+      '  back into that library (descriptive theme name) so future games reuse it.',
+      NO_IMAGE_INPUT,
+      PROTOCOL_CONTRACT
+    ].join('\n')
+  }
   const lines = [
     'You are running inside an automated workbench. Create a card0 game from this video:',
     `${job.youtube_url}  (title: "${job.title}")`,

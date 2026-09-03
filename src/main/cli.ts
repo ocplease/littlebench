@@ -11,12 +11,15 @@
  *   lb queue <videoId>...               # queue videos as game-builder jobs
  *   lb queue --candidates [--min-fit N] # queue everything above a fit bar
  *   lb queue-url <videoUrl> ["<title>"] # queue a single video URL (title auto-fetched)
+ *   lb queue-design "<title>"           # queue a build from a design brief (brief on stdin)
  *   lb status                           # jobs + games overview
  *   lb run <jobId>                      # run a job in the foreground
  *   lb events <jobId>                   # dump persisted events
  *   lb list
  */
-import { ensureDirs } from './paths'
+import { ensureDirs, jobWorkspace } from './paths'
+import { writeFileSync } from 'node:fs'
+import path from 'node:path'
 import { getDb, getJob, listJobs, listVideos, updateVideoStatus, VideoRow } from './db'
 import {
   createJob, startJob, executeJobWithPrompt, jobEventsFromDb, recoverInterrupted, jobIsLive
@@ -47,6 +50,17 @@ function tailEvents(jobId: string, fromSeq: number): number {
     }
   }
   return last
+}
+
+/** Read piped/heredoc stdin to end ('' when interactive). */
+function readStdin(): Promise<string> {
+  return new Promise((resolve) => {
+    if (process.stdin.isTTY) return resolve('')
+    let data = ''
+    process.stdin.setEncoding('utf8')
+    process.stdin.on('data', (c) => (data += c))
+    process.stdin.on('end', () => resolve(data))
+  })
 }
 
 async function waitForJob(jobId: string): Promise<void> {
@@ -150,6 +164,16 @@ async function main(): Promise<void> {
       const title = titleParts.join(' ') || (await fetchVideoTitle(url)) || url
       const id = createJob({ title, youtube_url: url, autostart: false })
       console.log(`queued ${id}  ${title}`)
+      return
+    }
+    case 'queue-design': {
+      const [title] = rest
+      if (!title) throw new Error('usage: queue-design "<title>" (full design brief on stdin)')
+      const brief = await readStdin()
+      if (!brief.trim()) throw new Error('pass the full design brief on stdin (pipe or heredoc)')
+      const id = createJob({ title, youtube_url: null, autostart: false })
+      writeFileSync(path.join(jobWorkspace(id), 'design_brief.md'), `${brief.trim()}\n`)
+      console.log(`queued ${id}  ${title} (design-brief build)`)
       return
     }
     case 'run': {
