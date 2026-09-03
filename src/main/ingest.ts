@@ -57,6 +57,23 @@ function bestThumbnail(e: FlatEntry): string | null {
   )
 }
 
+/** Look up a single video's title (for queueing a build by URL without a
+ *  scout pass). Returns null when the lookup fails - the URL still works
+ *  as a fallback title. */
+export async function fetchVideoTitle(url: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileP(
+      YTDLP_BIN,
+      ['--no-playlist', '--print', '%(title)s', normalizeChannelUrl(url)],
+      { encoding: 'utf8', env: shellEnv(), timeout: 120_000 }
+    )
+    const title = stdout.trim().split('\n')[0]?.trim()
+    return title || null
+  } catch {
+    return null
+  }
+}
+
 /** A bare channel URL (@handle, /channel/ID, /c/..., /user/...) resolves to a
  *  virtual "Shorts"-ish entry, not its uploads. Point it at the videos tab. */
 export function normalizeChannelUrl(url: string): string {

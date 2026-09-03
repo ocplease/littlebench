@@ -10,6 +10,7 @@
  *   lb videos [status]                  # list videos with fit/classification
  *   lb queue <videoId>...               # queue videos as game-builder jobs
  *   lb queue --candidates [--min-fit N] # queue everything above a fit bar
+ *   lb queue-url <videoUrl> ["<title>"] # queue a single video URL (title auto-fetched)
  *   lb status                           # jobs + games overview
  *   lb run <jobId>                      # run a job in the foreground
  *   lb events <jobId>                   # dump persisted events
@@ -20,7 +21,7 @@ import { getDb, getJob, listJobs, listVideos, updateVideoStatus, VideoRow } from
 import {
   createJob, startJob, executeJobWithPrompt, jobEventsFromDb, recoverInterrupted, jobIsLive
 } from './jobs'
-import { ingestChannel, scoutVideos } from './ingest'
+import { ingestChannel, scoutVideos, fetchVideoTitle } from './ingest'
 
 const TERMINAL = new Set(['awaiting_review', 'submitted', 'failed', 'interrupted', 'discarded'])
 
@@ -144,10 +145,11 @@ async function main(): Promise<void> {
     }
     case 'queue-url': {
       const [url, ...titleParts] = rest
-      if (!url) throw new Error('usage: queue-url <youtube-url> "<title>"')
-      const title = titleParts.join(' ') || url
+      if (!url) throw new Error('usage: queue-url <youtube-url> ["<title>"]')
+      // No title given: look it up so the board shows the real video name.
+      const title = titleParts.join(' ') || (await fetchVideoTitle(url)) || url
       const id = createJob({ title, youtube_url: url, autostart: false })
-      console.log(id)
+      console.log(`queued ${id}  ${title}`)
       return
     }
     case 'run': {
