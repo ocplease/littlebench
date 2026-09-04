@@ -82,9 +82,12 @@ export function sendForeman(message: string): { ok: boolean; error?: string } {
         broadcast('foreman:event', { type: 'thinking', text: b.thinking.slice(0, 2000) })
       } else if (b.type === 'tool_use' && typeof b.name === 'string') {
         const input = b.input as Record<string, unknown> | undefined
-        // Bash carries the command in input.command - that is the thing to show.
-        const label = input && typeof input.command === 'string' ? input.command : b.name
-        broadcast('foreman:event', { type: 'tool', label, detail: summarizeJson(b.input, 4000) })
+        broadcast('foreman:event', {
+          type: 'tool',
+          name: b.name,
+          preview: toolPreview(input),
+          detail: summarizeJson(b.input, 4000)
+        })
       } else if (b.type === 'tool_result') {
         broadcast('foreman:event', {
           type: 'tool_result',
@@ -156,6 +159,29 @@ function summarizeJson(value: unknown, max: number): string {
   } catch {
     return String(value).slice(0, max)
   }
+}
+
+/** The one-line argument preview Claude Code shows next to a tool name -
+ *  Bash's command, Read's file path, Grep's pattern: the identifying
+ *  argument, so `⏺ Bash(lb scout --new)` reads at a glance. */
+function toolPreview(input: Record<string, unknown> | undefined): string {
+  if (!input) return ''
+  const pick = (...keys: string[]): string => {
+    for (const k of keys) {
+      const v = input[k]
+      if (typeof v === 'string' && v.trim()) return v.trim().replace(/\s+/g, ' ')
+    }
+    return ''
+  }
+  const preview =
+    pick('command') ||
+    pick('file_path', 'path', 'notebook_path') ||
+    pick('pattern') ||
+    pick('url') ||
+    pick('query', 'question') ||
+    pick('description', 'prompt') ||
+    pick('skill', 'skill')
+  return preview.slice(0, 90)
 }
 
 /** Tool results are a string or an array of content blocks; flatten to text. */

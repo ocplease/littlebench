@@ -7,13 +7,20 @@ interface Live {
   text: string
 }
 
-/** One step of the foreman's live process feed: a thinking block, a tool
- *  call, or a tool result - rendered like Codex's inline activity. */
+/** One step of the foreman's live process feed: a thinking block or a tool
+ *  call. A tool's result arrives later and is attached to its row, mirroring
+ *  how Claude Code nests `⎿ output` under `⏺ Tool(arg)`. */
 interface ProcessItem {
   id: number
-  kind: 'thinking' | 'tool' | 'tool_result'
+  kind: 'thinking' | 'tool'
+  /** thinking: the thought text · tool: the tool NAME (Bash, Read…) */
   text: string
+  /** tool: the identifying argument - a command, path, pattern */
+  preview?: string
+  /** tool: full input JSON, shown when the row is expanded */
   detail?: string
+  /** tool: result output; undefined while the call is still running */
+  result?: string
   error?: boolean
 }
 
@@ -46,6 +53,20 @@ function pushProcess(item: Omit<ProcessItem, 'id'>): void {
   updateStore({ process: [...store.process, { ...item, id: ++idSeq }] })
 }
 
+/** Attach a tool result to the most recent tool row that is still waiting
+ *  for one (stream-json emits tool_use before its tool_result). */
+function attachResult(detail: string | undefined, error: boolean): void {
+  const items = store.process.slice()
+  for (let i = items.length - 1; i >= 0; i--) {
+    if (items[i].kind === 'tool' && items[i].result === undefined) {
+      items[i] = { ...items[i], result: detail ?? '', error }
+      updateStore({ process: items })
+      return
+    }
+  }
+  // orphan result with no matching tool row - nothing to attach to
+}
+
 /** End of a turn: collapse the process feed into an expandable summary. */
 function finalizeTurn(): void {
   if (store.process.length === 0) return
@@ -56,7 +77,14 @@ function finalizeTurn(): void {
 
 // Registered once at module load - survives view switches.
 window.api.on('foreman:event', (payload) => {
-  const p = payload as { type: string; text?: string; label?: string; detail?: string; error?: boolean | string | null }
+  const p = payload as {
+    type: string
+    text?: string
+    name?: string
+    preview?: string
+    detail?: string
+    error?: boolean | string | null
+  }
   if (p.type === 'user') {
     startAt = Date.now()
     updateStore({ live: null, process: [], doneTurn: null, busy: true })
@@ -67,9 +95,9 @@ window.api.on('foreman:event', (payload) => {
     pushProcess({ kind: 'thinking', text: p.text ?? '' })
   } else if (p.type === 'tool') {
     updateStore({ busy: true })
-    pushProcess({ kind: 'tool', text: p.label ?? '', detail: p.detail })
+    pushProcess({ kind: 'tool', text: p.name ?? 'tool', preview: p.preview, detail: p.detail })
   } else if (p.type === 'tool_result') {
-    pushProcess({ kind: 'tool_result', text: '', detail: p.detail, error: Boolean(p.error) })
+    attachResult(p.detail, Boolean(p.error))
   } else if (p.type === 'done') {
     finalizeTurn()
     if (p.error) updateStore({ live: null, busy: false })
@@ -180,9 +208,10 @@ export default function Chat() {
           <MessageBubble key={m.id} role={m.role} content={m.content} ts={m.created_at} />
         ))}
         {store.process.length > 0 && (
-          <div className="chat-process">
-            <div className="chat-process-head">
-              <span className="spinner" /> working…
+          <div className="cc-feed">
+            <div className="cc-status">
+              <span className="cc-star" />
+              {FOREMAN_NAME} is working…
             </div>
             {store.process.map((item) => (
               <ProcessRow key={item.id} item={item} />
@@ -199,9 +228,10 @@ export default function Chat() {
           </div>
         )}
         {store.doneTurn && (
-          <details className="chat-process-done">
+          <details className="cc-done">
             <summary>
-              ⚙ ran {store.doneTurn.tools} tool{store.doneTurn.tools === 1 ? '' : 's'} in {store.doneTurn.seconds}s
+              <span className="cc-star done" />
+              ran {store.doneTurn.tools} tool{store.doneTurn.tools === 1 ? '' : 's'} in {store.doneTurn.seconds}s
             </summary>
             {store.doneTurn.items.map((item) => (
               <ProcessRow key={`d-${item.id}`} item={item} />
@@ -277,37 +307,64 @@ function MessageBubble({ role, content, ts }: { role: string; content: string; t
   )
 }
 
-/** One collapsible step in the process feed - thinking, a tool call, or its result. */
+/** One row of the process feed, laid out like Claude Code's terminal:
+ *
+ *   ⏵⏵ Think                          <- collapsed thinking, dim + italic
+ *   ⏺ Bash(lb scout --new)            <- tool dot + bold name + arg preview
+ *     ⎿ Scouted 12 videos, 4 fit…     <- branch char + first line, expandable
+ *
+ * The ⎿ line is always visible (that's the at-a-glance output); expanding
+ * shows the full output. A tool still awaiting its result shows a spinner
+ * on the branch line instead. */
 function ProcessRow({ item }: { item: ProcessItem }) {
   if (item.kind === 'thinking') {
     return (
-      <details className="cp-row cp-thinking">
+      <details className="cc-row cc-think">
         <summary>
-          <span className="cp-badge">thinking</span>
-          <span className="cp-line">{item.text.replace(/\s+/g, ' ').slice(0, 90)}</span>
+          <span className="cc-caret">⏵</span>
+          <span className="cc-think-label">Think</span>
+          <span className="cc-hint">{item.text.replace(/\s+/g, ' ').slice(0, 60)}</span>
         </summary>
-        <pre>{item.text}</pre>
+        <pre className="cc-body">{item.text}</pre>
       </details>
     )
   }
-  if (item.kind === 'tool') {
-    return (
-      <details className="cp-row cp-tool">
-        <summary>
-          <span className="cp-badge">run</span>
-          <span className="cp-line">{item.text.replace(/\s+/g, ' ').slice(0, 110)}</span>
-        </summary>
-        {item.detail ? <pre>{item.detail}</pre> : null}
-      </details>
-    )
-  }
+
+  const lines = (item.result ?? '').split('\n').filter((l) => l.trim())
+  const firstLine = lines[0] ?? ''
+  const truncated = lines.length > 1 || (item.result ?? '').length > firstLine.length + 40
+
   return (
-    <details className={`cp-row cp-result ${item.error ? 'error' : ''}`}>
-      <summary>
-        <span className="cp-badge">{item.error ? '✗ error' : '↳ result'}</span>
-        <span className="cp-line">{(item.detail ?? '').replace(/\s+/g, ' ').slice(0, 90)}</span>
-      </summary>
-      <pre>{item.detail}</pre>
-    </details>
+    <div className={`cc-row cc-tool${item.error ? ' cc-err' : ''}`}>
+      <div className="cc-head" title={item.detail}>
+        <span className="cc-dot" />
+        <span className="cc-name">{item.text}</span>
+        {item.preview && <span className="cc-arg">({item.preview})</span>}
+      </div>
+      {item.result === undefined ? (
+        <div className="cc-out">
+          <span className="cc-branch" />
+          <span className="spinner cc-mini" />
+        </div>
+      ) : lines.length === 0 ? (
+        <div className="cc-out">
+          <span className="cc-branch" />
+          <span className="cc-line">done</span>
+        </div>
+      ) : truncated ? (
+        <details className="cc-out">
+          <summary>
+            <span className="cc-branch" />
+            <span className="cc-line">{firstLine.slice(0, 130)} …</span>
+          </summary>
+          <pre className="cc-body">{item.result}</pre>
+        </details>
+      ) : (
+        <div className="cc-out">
+          <span className="cc-branch" />
+          <span className="cc-line">{firstLine.slice(0, 130)}</span>
+        </div>
+      )}
+    </div>
   )
 }

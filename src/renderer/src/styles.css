@@ -1454,47 +1454,91 @@ input[type='checkbox'] { transform: scale(1.2); }
 }
 @keyframes blink { 50% { opacity: 0; } }
 
-/* Live process feed: the foreman's thinking + tool calls, Codex-style. */
-.chat-process, .chat-process-done {
+/* Live process feed, laid out like Claude Code's terminal:
+   ✳ status line, ⏵⏵ Think, ⏺ Tool(arg) with nested ⎿ output. */
+.cc-feed {
   align-self: flex-start; max-width: 720px; width: 100%;
-  display: flex; flex-direction: column; gap: 2px;
+  display: flex; flex-direction: column; gap: 3px;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
 }
-.chat-process-head {
+.cc-status {
   display: flex; align-items: center; gap: 8px;
-  font-size: 11px; color: var(--text-muted); padding: 0 4px;
+  font-size: 11px; color: var(--muted); padding: 2px 4px;
 }
-.cp-row summary {
+.cc-star { display: inline-block; width: 10px; height: 10px; }
+.cc-star::before { content: '✳'; color: var(--accent-purple); font-size: 13px; animation: cc-pulse 1.2s ease-in-out infinite; }
+.cc-star.done::before { content: '✻'; animation: none; color: var(--muted); }
+@keyframes cc-pulse { 50% { opacity: 0.25; } }
+
+.cc-row { padding: 1px 4px; border-radius: 6px; }
+.cc-row:hover { background: rgba(255,255,255,0.025); }
+
+.cc-row summary {
   display: flex; align-items: baseline; gap: 8px; cursor: pointer;
-  padding: 3px 4px; border-radius: 6px; list-style: none;
-  font-size: 12px; color: var(--text-muted);
-}
-.cp-row summary::-webkit-details-marker { display: none; }
-.cp-row summary:hover { background: var(--bg-raised); color: var(--text); }
-.cp-badge {
-  flex-shrink: 0; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em;
-  padding: 1px 6px; border-radius: 4px;
-  background: var(--bg-raised); border: 1px solid var(--border); color: var(--text-muted);
-}
-.cp-thinking .cp-badge { border-color: rgba(188, 140, 255, 0.4); color: #bc8cff; }
-.cp-tool .cp-badge { border-color: rgba(88, 166, 255, 0.4); color: #58a6ff; }
-.cp-result .cp-badge { border-color: var(--border); color: var(--text-muted); }
-.cp-result.error .cp-badge { border-color: rgba(248, 81, 73, 0.4); color: var(--accent-red); }
-.cp-line {
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 11.5px;
-}
-.cp-row pre {
-  margin: 2px 0 6px; padding: 8px 10px; border-radius: 8px;
-  background: var(--bg); border: 1px solid var(--border);
-  font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; word-break: break-word;
-  max-height: 260px; overflow-y: auto;
-}
-.chat-process-done summary {
-  cursor: pointer; font-size: 11.5px; color: var(--text-muted); padding: 2px 4px;
   list-style: none; user-select: none;
+  font-size: 12px; line-height: 1.7; overflow: hidden;
 }
-.chat-process-done summary::-webkit-details-marker { display: none; }
-.chat-process-done summary:hover { color: var(--text); }
+.cc-row summary::-webkit-details-marker { display: none; }
+
+/* thinking: ⏵⏵ Think, dim italic */
+.cc-think summary { color: var(--muted); font-style: italic; }
+.cc-think[open] > summary .cc-caret { transform: rotate(90deg); }
+.cc-caret { display: inline-block; font-style: normal; font-size: 10px; color: var(--muted); transition: transform 0.12s ease; }
+.cc-think-label { font-style: normal; font-size: 11.5px; color: var(--accent-purple); opacity: 0.75; }
+.cc-hint {
+  flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 11px; opacity: 0.7;
+}
+
+/* tool: ⏺ Name(arg) */
+.cc-head { display: flex; align-items: baseline; gap: 0; font-size: 12px; line-height: 1.7; min-width: 0; }
+.cc-dot {
+  flex-shrink: 0; width: 14px; font-size: 10px; color: var(--accent-purple);
+}
+.cc-dot::before { content: '⏺'; }
+.cc-err .cc-dot::before { content: '⏺'; color: var(--accent-red); }
+.cc-name { font-weight: 700; color: var(--text); }
+.cc-arg {
+  color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 11.5px;
+}
+
+/* result: ⎿ first line, expandable */
+.cc-out { display: flex; align-items: baseline; gap: 0; margin: 0; padding-left: 14px; min-width: 0; }
+.cc-out summary {
+  display: flex; align-items: baseline; gap: 0; cursor: pointer;
+  list-style: none; min-width: 0; overflow: hidden;
+  font-size: 12px; line-height: 1.7;
+}
+.cc-out summary::-webkit-details-marker { display: none; }
+.cc-branch { flex-shrink: 0; width: 18px; font-size: 11px; color: var(--muted); text-align: center; }
+.cc-branch::before { content: '⎿'; }
+.cc-line {
+  color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 11.5px;
+}
+.cc-err .cc-line { color: var(--accent-red); }
+.cc-mini { width: 9px; height: 9px; border-width: 1.5px; margin-left: 4px; }
+
+/* expanded body */
+.cc-body {
+  margin: 2px 0 4px; padding: 6px 10px 6px 30px;
+  font-size: 11px; line-height: 1.55; white-space: pre-wrap; word-break: break-word;
+  color: var(--muted);
+  max-height: 280px; overflow-y: auto;
+}
+.cc-think .cc-body { border-left: 2px solid color-mix(in srgb, var(--accent-purple) 30%, transparent); border-radius: 0; padding-left: 12px; margin-left: 14px; }
+
+/* collapsed done-turn */
+.cc-done summary {
+  cursor: pointer; font-size: 11.5px; color: var(--muted); padding: 2px 4px;
+  list-style: none; user-select: none;
+  display: flex; align-items: center; gap: 8px;
+  font-family: inherit;
+}
+.cc-done summary::-webkit-details-marker { display: none; }
+.cc-done summary:hover { color: var(--text); }
+.cc-done[open] > summary { margin-bottom: 4px; }
 
 .chat-input {
   display: flex; gap: 10px; align-items: flex-end;
