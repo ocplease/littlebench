@@ -269,6 +269,45 @@ function extractYouTubeId(url: string): string | null {
   return null
 }
 
+/** The game name is the human-meaningful identity of a job, so adopt it as
+ *  the title as soon as the agent settles on one. Queue-time titles are just
+ *  the video title (or a sanitized fallback when even that was CLI garbage).
+ *  Localization jobs keep their language suffix; dry-run jobs keep their
+ *  marker so queueLocalizations can still skip them. */
+function adoptGameTitle(jobId: string, gameName?: string | null): boolean {
+  const name = (gameName ?? '').trim()
+  if (!name) return false
+  const job = getJob(jobId)
+  if (!job) return false
+  if (job.title.includes('(DRY RUN)')) return false
+  const next = job.language !== 'en' ? `${name} (${job.language})` : name
+  if (job.title === next) return true
+  updateJob(jobId, { title: next.slice(0, 240) })
+  emit('jobs:changed', null)
+  return true
+}
+
+/** Read the game name out of a protocol-declared manifest artifact. Returns
+ *  true when a name was found (callers stop scanning after that). */
+function adoptTitleFromManifest(jobId: string, artifacts: unknown): boolean {
+  if (!Array.isArray(artifacts)) return false
+  for (const a of artifacts) {
+    if (!a || typeof a !== 'object') continue
+    const art = a as { type?: unknown; path?: unknown }
+    if (art.type !== 'manifest' || typeof art.path !== 'string' || !art.path) continue
+    const file = path.join(jobWorkspace(jobId), art.path)
+    if (!existsSync(file)) continue
+    try {
+      const manifest = JSON.parse(readFileSync(file, 'utf8')) as { game?: { name?: unknown }; name?: unknown }
+      const name = typeof manifest.game?.name === 'string' ? manifest.game.name
+        : typeof manifest.name === 'string' ? manifest.name
+        : null
+      if (adoptGameTitle(jobId, name)) return true
+    } catch { /* mid-write or not JSON yet - next poll retries */ }
+  }
+  return false
+}
+
 export function createJob(input: {
   video_id?: number | null
   title: string
@@ -379,9 +418,14 @@ export function executeJobWithPrompt(
 
   // workbench protocol: poll the agent-maintained tasks.json and mirror it
   let prevProtocolJson: string | null = null
+  let titleFromManifest = false
   const pollProtocol = () => {
     const parsed = parseProtocol(jobId)
-    if (parsed) prevProtocolJson = applyProtocol(jobId, parsed, prevProtocolJson) ? JSON.stringify(parsed) : prevProtocolJson
+    if (!parsed) return
+    if (applyProtocol(jobId, parsed, prevProtocolJson)) prevProtocolJson = JSON.stringify(parsed)
+    // As soon as the design phase lands the manifest, retitle the job with
+    // the game's name (once; result.json re-checks at the end).
+    if (!titleFromManifest) titleFromManifest = adoptTitleFromManifest(jobId, parsed.artifacts)
   }
 
   const keyEnv = agentEnv()
@@ -492,6 +536,7 @@ export function executeJobWithPrompt(
 
 function finalizeJob(jobId: string, result: ClaudeStreamEvent): void {
   const game = parseResultJson(jobId)
+  adoptGameTitle(jobId, game?.gameName)
   updateJob(jobId, {
     status: finalStatus(jobId),
     card0_game_id: game?.gameId ?? null,
@@ -535,6 +580,7 @@ function finalStatus(jobId: string): 'awaiting_review' | 'needs_input' {
 /** Agent exited cleanly but we never saw a result event - try result.json anyway. */
 function finalizeFromDisk(jobId: string): void {
   const game = parseResultJson(jobId)
+  adoptGameTitle(jobId, game?.gameName)
   updateJob(jobId, { status: finalStatus(jobId), finished_at: new Date().toISOString() })
   recordGame(jobId, game)
   const finished = getJob(jobId)
