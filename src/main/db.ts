@@ -170,7 +170,8 @@ function migrate(db: DatabaseSync): void {
     ['videos', 'thumbnail_url', 'TEXT'],
     ['jobs', 'phase', 'TEXT'],
     ['jobs', 'needs_input', 'TEXT'],
-    ['jobs', 'model', 'TEXT']
+    ['jobs', 'model', 'TEXT'],
+    ['foreman_messages', 'parts', 'TEXT']
   ]
   for (const [table, col, type] of addColumns) {
     const cols = db.prepare(`PRAGMA table_info(${table})`).all() as unknown as Array<{ name: string }>
@@ -457,14 +458,33 @@ export interface ForemanMessageRow {
   role: string
   content: string
   created_at: string
+  /** JSON of the turn's process feed (thinking/tool/text parts), parsed. */
+  parts?: { tools: number; seconds: number; items: Array<Record<string, unknown>> } | null
 }
 
-export function insertForemanMessage(role: string, content: string): void {
-  getDb().prepare('INSERT INTO foreman_messages (role, content) VALUES (?, ?)').run(role, content)
+export function insertForemanMessage(role: string, content: string, partsJson?: string): void {
+  getDb()
+    .prepare('INSERT INTO foreman_messages (role, content, parts) VALUES (?, ?, ?)')
+    .run(role, content, partsJson ?? null)
 }
 
 export function listForemanMessages(): ForemanMessageRow[] {
-  return getDb()
+  const rows = getDb()
     .prepare('SELECT * FROM foreman_messages ORDER BY id ASC')
-    .all() as unknown as ForemanMessageRow[]
+    .all() as unknown as Array<ForemanMessageRow & { parts: string | null }>
+  return rows.map(({ parts, ...rest }) => ({
+    ...rest,
+    parts: parseForemanParts(parts)
+  }))
+}
+
+function parseForemanParts(raw: string | null): ForemanMessageRow['parts'] {
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as ForemanMessageRow['parts']
+    if (parsed && Array.isArray(parsed.items)) return parsed
+  } catch {
+    // corrupt or foreign JSON - treat as absent
+  }
+  return null
 }

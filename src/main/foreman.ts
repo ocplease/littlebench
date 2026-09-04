@@ -68,6 +68,31 @@ const FOREMAN_PREAMBLE = [
   '  describe a queued build to the user, mention that image generation requires their approval.'
 ].join('\n')
 
+/** One recorded part of a foreman turn - the same shape the renderer's
+ *  process feed consumes, so a saved turn replays exactly as it streamed. */
+interface RunPart {
+  kind: 'thinking' | 'tool' | 'text'
+  text: string
+  preview?: string
+  detail?: string
+  result?: string
+  error?: boolean
+}
+
+let runParts: RunPart[] = []
+
+/** Attach a tool result to the most recent tool part still waiting for one
+ *  (stream-json emits tool_use before its tool_result). */
+function attachRunResult(detail: string, error: boolean): void {
+  for (let i = runParts.length - 1; i >= 0; i--) {
+    if (runParts[i].kind === 'tool' && runParts[i].result === undefined) {
+      runParts[i].result = detail
+      runParts[i].error = error
+      return
+    }
+  }
+}
+
 export function sendForeman(message: string): { ok: boolean; error?: string } {
   if (activeRun) return { ok: false, error: 'foreman is already working on your previous message' }
 
@@ -77,8 +102,10 @@ export function sendForeman(message: string): { ok: boolean; error?: string } {
   broadcast('foreman:event', { type: 'user', text: message })
 
   let answer = ''
-  // The chat UI shows a Codex-style process feed: thinking, tool calls, and
-  // tool results stream in as they happen instead of a bare "working…".
+  runParts = []
+  const startedAt = Date.now()
+  // The chat UI shows a Claude Code-style process feed: thinking, tool calls,
+  // and interleaved text stream in as they happen instead of a bare "working…".
   const captureText = (event: ClaudeStreamEvent) => {
     if (event.type !== 'assistant' && event.type !== 'user') return
     const content = (event.message as { content?: unknown } | undefined)?.content
@@ -89,8 +116,11 @@ export function sendForeman(message: string): { ok: boolean; error?: string } {
         if (!b.text) continue
         answer += (answer ? '\n\n' : '') + b.text
         broadcast('foreman:event', { type: 'delta', text: b.text })
+        runParts.push({ kind: 'text', text: b.text })
       } else if (b.type === 'thinking' && typeof b.thinking === 'string' && b.thinking) {
-        broadcast('foreman:event', { type: 'thinking', text: b.thinking.slice(0, 2000) })
+        const text = b.thinking.slice(0, 2000)
+        broadcast('foreman:event', { type: 'thinking', text })
+        runParts.push({ kind: 'thinking', text })
       } else if (b.type === 'tool_use' && typeof b.name === 'string') {
         const input = b.input as Record<string, unknown> | undefined
         broadcast('foreman:event', {
@@ -99,12 +129,20 @@ export function sendForeman(message: string): { ok: boolean; error?: string } {
           preview: toolPreview(input),
           detail: summarizeJson(b.input, 4000)
         })
+        runParts.push({
+          kind: 'tool',
+          text: b.name,
+          preview: toolPreview(input),
+          detail: summarizeJson(b.input, 4000)
+        })
       } else if (b.type === 'tool_result') {
+        const detail = summarizeResult(b.content)
         broadcast('foreman:event', {
           type: 'tool_result',
           error: Boolean(b.is_error),
-          detail: summarizeResult(b.content)
+          detail
         })
+        attachRunResult(detail, Boolean(b.is_error))
       }
     }
   }
@@ -142,7 +180,17 @@ export function sendForeman(message: string): { ok: boolean; error?: string } {
       const finalAnswer = wasInterrupted
         ? '(interrupted)'
         : answer.trim() || (code === 0 ? '(no reply)' : `foreman exited with code ${code}`)
-      insertForemanMessage('assistant', finalAnswer)
+      // Persist the turn's process feed so it replays after a restart.
+      const partsJson =
+        runParts.length > 0
+          ? JSON.stringify({
+              tools: runParts.filter((p) => p.kind === 'tool').length,
+              seconds: Math.max(1, Math.round((Date.now() - startedAt) / 1000)),
+              items: runParts
+            })
+          : undefined
+      insertForemanMessage('assistant', finalAnswer, partsJson)
+      runParts = []
       broadcast('foreman:event', { type: wasInterrupted ? 'interrupted' : 'saved', text: finalAnswer })
       broadcast('foreman:changed', null)
     }

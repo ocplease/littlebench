@@ -122,11 +122,29 @@ export type Card0AuthResult =
   | { ok: true; url?: string }
   | { ok: false; error: string }
 
+/** One part of a saved foreman turn - the same items the live process feed
+ *  showed, replayed under the message after a restart. */
+export interface ForemanPartItem {
+  kind: 'thinking' | 'tool' | 'text'
+  text: string
+  preview?: string
+  detail?: string
+  result?: string
+  error?: boolean
+}
+
+export interface ForemanTurnParts {
+  tools: number
+  seconds: number
+  items: ForemanPartItem[]
+}
+
 export interface ForemanMessage {
   id: number
   role: string
   content: string
   created_at: string
+  parts?: ForemanTurnParts | null
 }
 
 export interface WorkbenchApi {

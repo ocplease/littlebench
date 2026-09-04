@@ -2,18 +2,16 @@ import { useEffect, useRef, useState, useCallback, type ReactNode } from 'react'
 import type { ForemanMessage } from '../types'
 import { ModelPicker } from '../models'
 
-interface Live {
-  role: 'assistant'
-  text: string
-}
-
-/** One step of the foreman's live process feed: a thinking block or a tool
- *  call. A tool's result arrives later and is attached to its row, mirroring
- *  how Claude Code nests `⎿ output` under `⏺ Tool(arg)`. */
+/** One step of the foreman's live process feed: a thinking block, a tool
+ *  call, or a chunk of reply text - the Part-stream the plan prescribes, so
+ *  text shows chronologically between tool calls instead of piling up in
+ *  one bubble at the bottom. A tool's result arrives later and is attached
+ *  to its row, mirroring how Claude Code nests `⎿ output` under
+ *  `⏺ Tool(arg)`. */
 interface ProcessItem {
-  id: number
-  kind: 'thinking' | 'tool'
-  /** thinking: the thought text · tool: the tool NAME (Bash, Read…) */
+  id?: number
+  kind: 'thinking' | 'tool' | 'text'
+  /** thinking/text: the body · tool: the tool NAME (Bash, Read…) */
   text: string
   /** tool: the identifying argument - a command, path, pattern */
   preview?: string
@@ -35,7 +33,6 @@ interface DoneTurn {
  *  view is unmounted, and a remounted Chat renders whatever accumulated. */
 let store = {
   busy: false,
-  live: null as Live | null,
   process: [] as ProcessItem[],
   doneTurn: null as DoneTurn | null,
   /** last run was stopped by the user - show an "interrupted" divider */
@@ -54,7 +51,7 @@ let idSeq = 0
 let startAt = 0
 
 function pushProcess(item: Omit<ProcessItem, 'id'>): void {
-  updateStore({ process: [...store.process, { ...item, id: ++idSeq }] })
+  updateStore({ process: [...store.process, { ...item, id: ++idSeq } as ProcessItem] })
 }
 
 /** Attach a tool result to the most recent tool row that is still waiting
@@ -91,9 +88,10 @@ window.api.on('foreman:event', (payload) => {
   }
   if (p.type === 'user') {
     startAt = Date.now()
-    updateStore({ live: null, process: [], doneTurn: null, busy: true, interrupted: false, lastUser: p.text ?? '' })
+    updateStore({ process: [], doneTurn: null, busy: true, interrupted: false, lastUser: p.text ?? '' })
   } else if (p.type === 'delta') {
-    updateStore({ busy: true, live: { role: 'assistant', text: (store.live?.text ?? '') + (p.text ?? '') } })
+    updateStore({ busy: true })
+    pushProcess({ kind: 'text', text: p.text ?? '' })
   } else if (p.type === 'thinking') {
     updateStore({ busy: true })
     pushProcess({ kind: 'thinking', text: p.text ?? '' })
@@ -104,13 +102,13 @@ window.api.on('foreman:event', (payload) => {
     attachResult(p.detail, Boolean(p.error))
   } else if (p.type === 'done') {
     finalizeTurn()
-    if (p.error) updateStore({ live: null, busy: false })
+    if (p.error) updateStore({ busy: false })
   } else if (p.type === 'interrupted') {
     finalizeTurn()
-    updateStore({ live: null, busy: false, interrupted: true })
+    updateStore({ busy: false, interrupted: true })
   } else if (p.type === 'saved' || p.type === 'reset') {
     finalizeTurn()
-    updateStore({ live: null, busy: false, interrupted: false })
+    updateStore({ busy: false, interrupted: false })
   }
 })
 
@@ -162,7 +160,7 @@ export default function Chat() {
 
   useEffect(() => {
     if (atBottomRef.current) listRef.current?.scrollTo({ top: listRef.current.scrollHeight })
-  }, [messages, store.live, store.process])
+  }, [messages, store.process])
 
   const sendText = async (text: string) => {
     if (!text || store.busy) return
@@ -211,7 +209,7 @@ export default function Chat() {
       </div>
 
       <div className="chat-list" ref={listRef} onScroll={onScroll}>
-        {messages.length === 0 && !store.live && (
+        {messages.length === 0 && store.process.length === 0 && (
           <div className="chat-welcome">
             <div className="chat-welcome-title">🧢 {FOREMAN_NAME} is ready.</div>
             <div className="muted">Try:</div>
@@ -228,26 +226,34 @@ export default function Chat() {
           </div>
         )}
         {messages.map((m) => (
-          <MessageBubble key={m.id} role={m.role} content={m.content} ts={m.created_at} />
+          <div key={m.id} className="chat-turn">
+            <MessageBubble role={m.role} content={m.content} ts={m.created_at} />
+            {m.role === 'assistant' && hasToolParts(m.parts) && (
+              <details className="cc-done cc-done-hist">
+                <summary>
+                  <span className="cc-star done" />
+                  ran {m.parts!.tools} tool{m.parts!.tools === 1 ? '' : 's'} in {m.parts!.seconds}s
+                </summary>
+                {m.parts!.items.map((item, i) =>
+                  item.kind === 'text' ? null : <ProcessRow key={i} item={item} />
+                )}
+              </details>
+            )}
+          </div>
         ))}
-        {store.process.length > 0 && (
+        {(store.busy || store.process.length > 0) && (
           <div className="cc-feed">
             <div className="cc-status">
               <span className="cc-star" />
               {FOREMAN_NAME} is working…
             </div>
-            {store.process.map((item) => (
-              <ProcessRow key={item.id} item={item} />
+            {store.process.map((item, i) => (
+              <ProcessRow
+                key={item.id ?? i}
+                item={item}
+                streaming={store.busy && i === store.process.length - 1}
+              />
             ))}
-          </div>
-        )}
-        {store.live && (
-          <div className="chat-msg assistant">
-            <div className="chat-role">{FOREMAN_NAME}</div>
-            <div className="chat-bubble">
-              <Md text={store.live.text} />
-              <span className="chat-cursor" />
-            </div>
           </div>
         )}
         {store.interrupted && !store.busy && (
@@ -268,18 +274,10 @@ export default function Chat() {
               <span className="cc-star done" />
               ran {store.doneTurn.tools} tool{store.doneTurn.tools === 1 ? '' : 's'} in {store.doneTurn.seconds}s
             </summary>
-            {store.doneTurn.items.map((item) => (
-              <ProcessRow key={`d-${item.id}`} item={item} />
-            ))}
+            {store.doneTurn.items.map(
+              (item, i) => (item.kind === 'text' ? null : <ProcessRow key={item.id ?? i} item={item} />)
+            )}
           </details>
-        )}
-        {store.busy && !store.live && store.process.length === 0 && (
-          <div className="chat-msg assistant">
-            <div className="chat-role">{FOREMAN_NAME}</div>
-            <div className="chat-bubble muted">
-              <span className="spinner" /> working…
-            </div>
-          </div>
         )}
       </div>
 
@@ -329,6 +327,12 @@ export default function Chat() {
       </div>
     </div>
   )
+}
+
+/** A saved turn is worth a collapsed "ran N tools" row only if it actually
+ *  used tools - pure-text turns render as a plain bubble. */
+function hasToolParts(parts: ForemanMessage['parts']): boolean {
+  return Boolean(parts?.items.some((i) => i.kind !== 'text'))
 }
 
 /** Minimal markdown for chat bubbles: fenced code blocks, inline code,
@@ -400,11 +404,21 @@ function MessageBubble({ role, content, ts }: { role: string; content: string; t
  *   ⏵⏵ Think                          <- collapsed thinking, dim + italic
  *   ⏺ Bash(lb scout --new)            <- tool dot + bold name + arg preview
  *     ⎿ Scouted 12 videos, 4 fit…     <- branch char + first line, expandable
+ *   Here are the candidates…          <- reply text, interleaved in time order
  *
  * The ⎿ line is always visible (that's the at-a-glance output); expanding
  * shows the full output. A tool still awaiting its result shows a spinner
  * on the branch line instead. */
-function ProcessRow({ item }: { item: ProcessItem }) {
+function ProcessRow({ item, streaming }: { item: ProcessItem; streaming?: boolean }) {
+  if (item.kind === 'text') {
+    return (
+      <div className="cc-text">
+        <Md text={item.text} />
+        {streaming && <span className="chat-cursor" />}
+      </div>
+    )
+  }
+
   if (item.kind === 'thinking') {
     return (
       <details className="cc-row cc-think">
