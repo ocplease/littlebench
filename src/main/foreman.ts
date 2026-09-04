@@ -16,9 +16,20 @@ export function setForemanBroadcast(fn: Broadcast): void {
 }
 
 let activeRun: AgentRun | null = null
+// Set when the user stops the run; onExit turns it into an "interrupted"
+// broadcast instead of a half-finished answer.
+let interrupted = false
 
 export function foremanBusy(): boolean {
   return activeRun !== null
+}
+
+/** User pressed Stop: kill the agent run. The child's exit handler still
+ *  fires and finalizes the turn, so the UI and DB stay consistent. */
+export function stopForeman(): void {
+  if (!activeRun) return
+  interrupted = true
+  activeRun.kill()
 }
 
 const FOREMAN_PREAMBLE = [
@@ -126,9 +137,13 @@ export function sendForeman(message: string): { ok: boolean; error?: string } {
     },
     onExit: (code) => {
       activeRun = null
-      const finalAnswer = answer.trim() || (code === 0 ? '(no reply)' : `foreman exited with code ${code}`)
+      const wasInterrupted = interrupted
+      interrupted = false
+      const finalAnswer = wasInterrupted
+        ? '(interrupted)'
+        : answer.trim() || (code === 0 ? '(no reply)' : `foreman exited with code ${code}`)
       insertForemanMessage('assistant', finalAnswer)
-      broadcast('foreman:event', { type: 'saved', text: finalAnswer })
+      broadcast('foreman:event', { type: wasInterrupted ? 'interrupted' : 'saved', text: finalAnswer })
       broadcast('foreman:changed', null)
     }
   })

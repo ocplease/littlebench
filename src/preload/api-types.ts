@@ -171,6 +171,7 @@ export interface WorkbenchApi {
   foremanSend(message: string): Promise<ApproveResult>
   foremanMessages(): Promise<ForemanMessage[]>
   foremanBusy(): Promise<boolean>
+  foremanStop(): Promise<void>
   foremanReset(): Promise<void>
 
   // card0 account / auth

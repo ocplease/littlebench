@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, type ReactNode } from 'react'
 import type { ForemanMessage } from '../types'
 import { ModelPicker } from '../models'
 
@@ -37,7 +37,11 @@ let store = {
   busy: false,
   live: null as Live | null,
   process: [] as ProcessItem[],
-  doneTurn: null as DoneTurn | null
+  doneTurn: null as DoneTurn | null,
+  /** last run was stopped by the user - show an "interrupted" divider */
+  interrupted: false,
+  /** the user text of the last sent message, for Retry */
+  lastUser: ''
 }
 const storeListeners = new Set<() => void>()
 
@@ -87,7 +91,7 @@ window.api.on('foreman:event', (payload) => {
   }
   if (p.type === 'user') {
     startAt = Date.now()
-    updateStore({ live: null, process: [], doneTurn: null, busy: true })
+    updateStore({ live: null, process: [], doneTurn: null, busy: true, interrupted: false, lastUser: p.text ?? '' })
   } else if (p.type === 'delta') {
     updateStore({ busy: true, live: { role: 'assistant', text: (store.live?.text ?? '') + (p.text ?? '') } })
   } else if (p.type === 'thinking') {
@@ -101,9 +105,12 @@ window.api.on('foreman:event', (payload) => {
   } else if (p.type === 'done') {
     finalizeTurn()
     if (p.error) updateStore({ live: null, busy: false })
+  } else if (p.type === 'interrupted') {
+    finalizeTurn()
+    updateStore({ live: null, busy: false, interrupted: true })
   } else if (p.type === 'saved' || p.type === 'reset') {
     finalizeTurn()
-    updateStore({ live: null, busy: false })
+    updateStore({ live: null, busy: false, interrupted: false })
   }
 })
 
@@ -143,14 +150,23 @@ export default function Chat() {
     }
   }, [load])
 
+  // Stick-to-bottom: keep scrolling to new content while the user is at the
+  // bottom, but stop yanking them down the moment they scroll up to read.
+  // Sending a message snaps back to the bottom.
+  const atBottomRef = useRef(true)
+  const onScroll = () => {
+    const el = listRef.current
+    if (!el) return
+    atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48
+  }
+
   useEffect(() => {
-    listRef.current?.scrollTo({ top: listRef.current.scrollHeight })
+    if (atBottomRef.current) listRef.current?.scrollTo({ top: listRef.current.scrollHeight })
   }, [messages, store.live, store.process])
 
-  const send = async () => {
-    const text = draft.trim()
+  const sendText = async (text: string) => {
     if (!text || store.busy) return
-    setDraft('')
+    atBottomRef.current = true
     updateStore({ busy: true })
     const res = await window.api.foremanSend(text)
     if (!res.ok) {
@@ -164,6 +180,13 @@ export default function Chat() {
       // reload so the message list shows it immediately.
       load()
     }
+  }
+
+  const send = () => {
+    const text = draft.trim()
+    if (!text) return
+    setDraft('')
+    void sendText(text)
   }
 
   return (
@@ -187,7 +210,7 @@ export default function Chat() {
         )}
       </div>
 
-      <div className="chat-list" ref={listRef}>
+      <div className="chat-list" ref={listRef} onScroll={onScroll}>
         {messages.length === 0 && !store.live && (
           <div className="chat-welcome">
             <div className="chat-welcome-title">🧢 {FOREMAN_NAME} is ready.</div>
@@ -222,9 +245,21 @@ export default function Chat() {
           <div className="chat-msg assistant">
             <div className="chat-role">{FOREMAN_NAME}</div>
             <div className="chat-bubble">
-              {store.live.text}
+              <Md text={store.live.text} />
               <span className="chat-cursor" />
             </div>
+          </div>
+        )}
+        {store.interrupted && !store.busy && (
+          <div className="cc-interrupt">
+            <span className="cc-interrupt-rule" />
+            <span className="cc-interrupt-label">interrupted</span>
+            {store.lastUser && (
+              <button className="small-btn" onClick={() => void sendText(store.lastUser)}>
+                Retry
+              </button>
+            )}
+            <span className="cc-interrupt-rule" />
           </div>
         )}
         {store.doneTurn && (
@@ -266,9 +301,18 @@ export default function Chat() {
         <div className="chat-composer-foot">
           <div className="chat-composer-foot-left">
             {store.busy && (
-              <span className="chat-working" title={`${FOREMAN_NAME} is running`}>
-                <span className="status-dot" /> Working…
-              </span>
+              <>
+                <span className="chat-working" title={`${FOREMAN_NAME} is running`}>
+                  <span className="status-dot" /> Working…
+                </span>
+                <button
+                  className="small-btn chat-stop"
+                  title="Stop Steven's current run"
+                  onClick={() => window.api.foremanStop()}
+                >
+                  Stop
+                </button>
+              </>
             )}
           </div>
           <div className="chat-composer-foot-right">
@@ -287,6 +331,49 @@ export default function Chat() {
   )
 }
 
+/** Minimal markdown for chat bubbles: fenced code blocks, inline code,
+ *  bold, and bare links. Enough for the foreman's replies without pulling
+ *  a markdown dependency into the bundle. */
+function Md({ text }: { text: string }) {
+  // Odd chunks live between ``` fences and render as code blocks.
+  const chunks = text.split('```')
+  return (
+    <div className="md">
+      {chunks.map((chunk, i) =>
+        i % 2 === 1 ? (
+          <pre key={i} className="md-code">
+            <code>{chunk.replace(/^[a-zA-Z0-9_+-]*\n/, '').replace(/\n$/, '')}</code>
+          </pre>
+        ) : chunk.trim() ? (
+          <p key={i}>{renderInline(chunk)}</p>
+        ) : null
+      )}
+    </div>
+  )
+}
+
+function renderInline(text: string): ReactNode[] {
+  const out: ReactNode[] = []
+  const re = /`([^`]+)`|\*\*([^*]+)\*\*|(https?:\/\/[^\s<>"')]+)/g
+  let last = 0
+  let key = 0
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) out.push(text.slice(last, m.index))
+    if (m[1] !== undefined) out.push(<code key={key++}>{m[1]}</code>)
+    else if (m[2] !== undefined) out.push(<strong key={key++}>{m[2]}</strong>)
+    else if (m[3] !== undefined)
+      out.push(
+        <a key={key++} href={m[3]} target="_blank" rel="noreferrer">
+          {m[3]}
+        </a>
+      )
+    last = re.lastIndex
+  }
+  if (last < text.length) out.push(text.slice(last))
+  return out
+}
+
 /** A single message in the chat log: role avatar, name, bubble. The avatar
  *  is a small colored circle with a one-letter initial — tighter than a full
  *  icon, reads at a glance, matches Codex. */
@@ -301,8 +388,9 @@ function MessageBubble({ role, content, ts }: { role: string; content: string; t
           <span className="chat-name">{display}</span>
           {ts && <span className="chat-time muted small">{ts.slice(11, 16)}</span>}
         </div>
-        <div className="chat-bubble-new">{content}</div>
-      </div>
+        <div className="chat-bubble-new">
+          <Md text={content} />
+        </div>      </div>
     </div>
   )
 }
@@ -333,6 +421,9 @@ function ProcessRow({ item }: { item: ProcessItem }) {
   const lines = (item.result ?? '').split('\n').filter((l) => l.trim())
   const firstLine = lines[0] ?? ''
   const truncated = lines.length > 1 || (item.result ?? '').length > firstLine.length + 40
+  // A failed tool call opens itself: errors are the one output you always
+  // want to see in full (matches Claude Code's red expanded rows).
+  const expandable = truncated || item.error === true
 
   return (
     <div className={`cc-row cc-tool${item.error ? ' cc-err' : ''}`}>
@@ -346,16 +437,11 @@ function ProcessRow({ item }: { item: ProcessItem }) {
           <span className="cc-branch" />
           <span className="spinner cc-mini" />
         </div>
-      ) : lines.length === 0 ? (
-        <div className="cc-out">
-          <span className="cc-branch" />
-          <span className="cc-line">done</span>
-        </div>
-      ) : truncated ? (
-        <details className="cc-out">
+      ) : expandable ? (
+        <details className="cc-out" open={item.error === true}>
           <summary>
             <span className="cc-branch" />
-            <span className="cc-line">{firstLine.slice(0, 130)} …</span>
+            <span className="cc-line">{(firstLine || (item.error ? 'error' : 'done')).slice(0, 130)} …</span>
           </summary>
           <pre className="cc-body">{item.result}</pre>
         </details>

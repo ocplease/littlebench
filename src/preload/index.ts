@@ -47,6 +47,7 @@ const api: WorkbenchApi = {
   foremanSend: (message) => ipcRenderer.invoke('foreman:send', message),
   foremanMessages: () => ipcRenderer.invoke('foreman:messages'),
   foremanBusy: () => ipcRenderer.invoke('foreman:busy'),
+  foremanStop: () => ipcRenderer.invoke('foreman:stop'),
   foremanReset: () => ipcRenderer.invoke('foreman:reset'),
 
   // card0 account / auth

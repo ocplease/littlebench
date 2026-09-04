@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import path from 'node:path'
 import { readFileSync, existsSync } from 'node:fs'
 import { ensureDirs, jobWorkspace, workbenchRoot } from './paths'
@@ -7,7 +7,7 @@ import { getDb, getSetting, setSetting, listVideos, listJobs, getJob, listGames,
 import { setBroadcast, setShuttingDown, createJob, startJob, stopJob, pauseJob, resumeJob, approveJob, syncJobStatus, discardJob, deleteJob, restartJob, steerJob, jobEventsFromDb, listArtifacts, recoverInterrupted, pumpQueue, openGame, jobIsLive } from './jobs'
 import { ingestChannel, scoutVideos, deepScoutVideo } from './ingest'
 import { updateVideoStatus, updateVideoScout, deleteVideo } from './db'
-import { setForemanBroadcast, sendForeman, foremanBusy, resetForeman } from './foreman'
+import { setForemanBroadcast, sendForeman, foremanBusy, resetForeman, stopForeman } from './foreman'
 import { keyPoolStatus } from './keys'
 import { card0AccountInfo, card0LoginWeb, card0Logout, setCard0Broadcast } from './card0-auth'
 
@@ -40,6 +40,12 @@ function createWindow(): void {
   } else {
     mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'))
   }
+
+  // Links in chat replies open in the user's browser, never a bare window.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//.test(url)) void shell.openExternal(url)
+    return { action: 'deny' }
+  })
 }
 
 // ---------- IPC handlers ----------
@@ -231,6 +237,7 @@ function registerIpc(): void {
   handle('foreman:send', (message: string) => sendForeman(message))
   handle('foreman:messages', () => listForemanMessages())
   handle('foreman:busy', () => foremanBusy())
+  handle('foreman:stop', () => stopForeman())
   handle('foreman:reset', () => resetForeman())
 
   // ---------- card0 account / auth ----------
