@@ -547,8 +547,10 @@ input[type='checkbox'] { transform: scale(1.2); }
   background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
   flex-shrink: 0;
 }
+.st-avatar-img { object-fit: cover; }
 .st-account-id { min-width: 0; flex: 1; }
 .st-account-email { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-account-sub { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .st-account-badge { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); margin-top: 2px; }
 
 .st-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex-shrink: 0; }

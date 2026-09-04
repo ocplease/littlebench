@@ -249,9 +249,20 @@ export default function SettingsView() {
       const initial = (label[0] ?? '?').toUpperCase()
       return (
         <div className="st-account st-account-in">
-          <div className="st-avatar">{initial}</div>
+          {a.avatar_url ? (
+            <img className="st-avatar st-avatar-img" src={a.avatar_url} alt="" />
+          ) : (
+            <div className="st-avatar">{initial}</div>
+          )}
           <div className="st-account-id">
-            <div className="st-account-email">{label}</div>
+            {a.name && a.name !== label ? (
+              <>
+                <div className="st-account-email">{a.name}</div>
+                <div className="st-account-sub">{label}</div>
+              </>
+            ) : (
+              <div className="st-account-email">{label}</div>
+            )}
             <div className="st-account-badge">
               <span className="st-dot st-dot-ok" /> Connected
             </div>

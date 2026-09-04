@@ -13,6 +13,9 @@
  */
 
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import path from 'node:path'
 import { shell } from 'electron'
 import { CARD0_BIN, shellEnv } from './paths'
 
@@ -28,6 +31,8 @@ export interface Card0Account {
   id?: string
   email?: string
   name?: string
+  /** Google account photo, read from the CLI's stored session. */
+  avatar_url?: string
   /** Free-form extras - the CLI may add fields over time. */
   [key: string]: unknown
 }
@@ -63,7 +68,7 @@ export async function card0AccountInfo(): Promise<Card0AccountInfo> {
 
       if (obj.ok === true) {
         const account = (obj.account ?? obj.user ?? obj) as Card0Account
-        return { ok: true, account }
+        return { ok: true, account: withExtras(account) }
       }
       if ('error' in obj) {
         const err = obj.error as { code?: string; message?: string } | undefined
@@ -74,7 +79,7 @@ export async function card0AccountInfo(): Promise<Card0AccountInfo> {
       }
       // bare logged-in shape: {id, email, providers} or {user: {...}}
       if (obj.email || obj.id || obj.user) {
-        return { ok: true, account: (obj.user ?? obj) as Card0Account }
+        return { ok: true, account: withExtras((obj.user ?? obj) as Card0Account) }
       }
       if (obj.authenticated === false) {
         return { ok: false, reason: 'auth_required', message: 'Not logged in' }
@@ -172,6 +177,31 @@ export function isAuthRequiredError(text: string): boolean {
 }
 
 // ---------- helpers ----------
+
+/** `card0 account info` only prints {id, email, providers} - the avatar and
+ *  display name live in the session the CLI persists on disk. Read them from
+ *  there (same path the CLI uses) without touching any token fields. */
+function withExtras(account: Card0Account): Card0Account {
+  try {
+    const dir = process.env.CARD0_CONFIG_DIR || path.join(homedir(), '.card0')
+    const raw = readFileSync(path.join(dir, 'credentials.json'), 'utf8')
+    const session = (JSON.parse(raw) as Record<string, unknown>)['card0-cli-auth'] as
+      | { user?: { user_metadata?: Record<string, unknown> } }
+      | undefined
+    const meta = session?.user?.user_metadata
+    if (!meta) return account
+    return {
+      ...account,
+      name: account.name ?? (typeof meta.full_name === 'string' ? meta.full_name : undefined) ?? (typeof meta.name === 'string' ? meta.name : undefined),
+      avatar_url:
+        typeof meta.avatar_url === 'string' ? meta.avatar_url
+        : typeof meta.picture === 'string' ? meta.picture
+        : undefined
+    }
+  } catch {
+    return account
+  }
+}
 
 function errMsg(e: unknown): string {
   const text = e instanceof Error ? e.message : String(e)
