@@ -47,24 +47,41 @@ export function setCard0Broadcast(fn: Broadcast): void {
 let loginChild: ChildProcess | null = null
 
 /** Run `card0 account info` and parse the result. Never throws - returns a
- *  structured Card0AccountInfo so the UI can render the right state. */
+ *  structured Card0AccountInfo so the UI can render the right state.
+ *
+ *  Response shapes (from the CLI source):
+ *   - logged in:  {id, email, providers}          (bare, no ok wrapper)
+ *   - logged out: {ok: false, error: {code: AUTH_REQUIRED, ...}}  (exit 1)
+ *   - future:      {ok: true, account: {...}}
+ */
 export async function card0AccountInfo(): Promise<Card0AccountInfo> {
   try {
     const { stdout, stderr } = await runCard0(['account', 'info'], 15_000)
     const parsed = parseCard0Json(`${stdout}\n${stderr}`)
-    if (parsed && typeof parsed === 'object' && 'ok' in parsed) {
-      if (parsed.ok === true) {
-        const account = (parsed as { account?: Card0Account }).account ?? {}
+    if (parsed && typeof parsed === 'object') {
+      const obj = parsed as Record<string, unknown>
+
+      if (obj.ok === true) {
+        const account = (obj.account ?? obj.user ?? obj) as Card0Account
         return { ok: true, account }
       }
-      // CLI returned {ok: false, error: {...}}; check for AUTH_REQUIRED.
-      const err = (parsed as { error?: { code?: string; message?: string } }).error
-      if (err?.code === 'AUTH_REQUIRED') {
-        return { ok: false, reason: 'auth_required', message: err.message ?? 'Not logged in' }
+      if ('error' in obj) {
+        const err = obj.error as { code?: string; message?: string } | undefined
+        if (!err || err.code === 'AUTH_REQUIRED') {
+          return { ok: false, reason: 'auth_required', message: err?.message ?? 'Not logged in' }
+        }
+        return { ok: false, reason: 'unknown', message: err.message ?? 'account info unavailable' }
       }
-      return { ok: false, reason: 'unknown', message: err?.message ?? 'account info unavailable' }
+      // bare logged-in shape: {id, email, providers} or {user: {...}}
+      if (obj.email || obj.id || obj.user) {
+        return { ok: true, account: (obj.user ?? obj) as Card0Account }
+      }
+      if (obj.authenticated === false) {
+        return { ok: false, reason: 'auth_required', message: 'Not logged in' }
+      }
     }
-    return { ok: false, reason: 'unknown', message: 'unexpected response from card0' }
+    const raw = `${stdout}\n${stderr}`.trim().slice(0, 200)
+    return { ok: false, reason: 'unknown', message: raw ? `unexpected response from card0: ${raw}` : 'unexpected response from card0' }
   } catch (e) {
     const text = e instanceof Error ? e.message : String(e)
     if (isAuthRequiredError(text)) {
