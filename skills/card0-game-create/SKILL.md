@@ -42,6 +42,7 @@ Create a manifest file at `manifest.json` following the card0 schema v1. See `re
 - `game.language` must be exactly `en`, `ja`, `zh-Hans`, or `other` (not `zh`, not `zh-CN`).
 - Each card must be a separate object with `quantity` >= 1.
 - Every deck must have a `name` and a `cards` array.
+- Set the three structured metadata fields now — **submission is rejected without them**: `categoryTags` (1-3 of Party, Family, Strategy, Educational, Puzzle, Social Deduction, Role-playing, Trivia, Kids, Casual), `mechanicTags` (1-3 of Drafting, Bluffing, Set Collection, Memory, Storytelling, Push-your-luck, Cooperative, Dexterity, Matching, Resource Management), `estimatedMinutes` (1-480). These are canonical lists — no invented values. Keep them identical across language variants.
 - For round-based games, the deck's total card count should match the printed rules exactly. The English Desperate Oasis game uses 15 oasis cards because the rulebook has 3 rounds × 5 cards. Mirror that pattern for any round-based game.
 - **Tokens, coins, and other physical items are cards too.** If the game pack includes tokens, coins, markers, or any other loose items, represent each item type as a card in its **own dedicated deck** (e.g. a `tokenDeck` containing "Coin token", "Victory point token", etc., with `quantity` matching the physical count, or a suitable deck quantity if it's a large pile). Don't model them as a separate non-card entity — the manifest only knows decks and cards. A dedicated deck also matters downstream: each deck gets its own card back (Stage 5), so token cards should not share a back with the animal or score decks.
 - **Multi-language build**: if the user wants en + zh + ja at the same time, author all three manifests NOW (`manifest_en.json`, `manifest_zh.json`, `manifest_ja.json`) while the design is fresh. Translate name, description, rules, and every card's name/description; keep `value`, `quantity`, `type` identical across languages. See Stage 9 for the full parallel build flow.
@@ -87,19 +88,31 @@ Group card faces by:
 
 List the unique designs in `cards_plan.json` with: `id`, `value`, `name_en`, `name_zh`, `name_ja`, `ability_xx`, `color_theme`. This is your source of truth for prompts.
 
+<<<<<<< HEAD
 **Exception — token/coin cards:** for cards that represent a physical token, coin, or marker (see Stage 2), generate just the **item's image** — a single coin, token, or marker illustration in the game's art style — not a framed card face with a value medallion, name banner, or ability text. The item image is uploaded as the card front with `--mode full_face` exactly like any other card. Token cards live in their own deck, so they also get their **own card back** (see below), not the animal/score deck's back.
 
 ### Card back - reuse first, generate only if necessary
+=======
+### Card back - theme-match first (never ship a clashing back)
+>>>>>>> cb043dcd9dbcf3faa003ec1c3369562b60a80260
 
-Every card also needs a **back** image (card0 takes it per card via `--face back`). Backs must be **textless and language-neutral** - an ornamental pattern, frame, or emblem, never title text - so one back serves every language version and every game with a similar theme. This is a deliberate token saver: image generation is the expensive stage.
+Every card also needs a **back** image (card0 takes it per card via `--face back`). Backs must be **textless and language-neutral** - an ornamental pattern, frame, or emblem, never title text - so one back can serve every language version of a game.
 
+<<<<<<< HEAD
 **Backs are per-deck.** Each deck needs its own back, and it can be a different one per deck within the same game — e.g. the animal deck gets `card_back.jpg`, the score deck gets `card_back_oasis.jpg`, a token deck gets `card_back_token.jpg`. The reuse-first workflow below applies to each deck independently.
 
 1. **Check the shared back library first.** The workbench prompt gives you its path (default: `<workbench-root>/assets/card-backs/`). Files are named by theme, e.g. `back_desert_arabesque.jpg`, `back_fantasy_ornate.jpg`.
 2. **If a back fits the game's theme, reuse it**: copy it into your workspace as `card_back.jpg` and skip generation entirely.
 3. **Only if nothing fits** (empty library, or every back clashes with the theme): generate ONE back with Seedream - square, matching the game's art style and palette, strictly textless. Compress it (Stage 7) to `card_back.jpg`, **and also copy it into the library** with a descriptive name (`cp card_back.jpg <library>/back_<theme>.jpg`) so future games reuse it instead of generating.
+=======
+**Human ruling (2026-09-01): the back must match the game's art style, palette, and theme. Reusing a library back just to save a generation is NOT acceptable when it clashes, and do not ask the user about the tradeoff - just follow this policy:**
+>>>>>>> cb043dcd9dbcf3faa003ec1c3369562b60a80260
 
-For localized builds (Stage 9), always reuse the parent game's `card_back.jpg` or the library - backs are language-neutral, so localization never generates a new back.
+1. **Check the shared back library** (the workbench prompt gives its path, default `<workbench-root>/assets/card-backs/`). Files are named by theme, e.g. `back_desert_arabesque.jpg`, `back_lacquered_wood_hex.jpg`. **Reuse a library back only if its theme/art style/palette genuinely matches THIS game.** Copy it into your workspace as `card_back.jpg` and skip generation - that's the token saver.
+2. **If no library back matches the game's theme** (empty library, or every back clashes): generate ONE theme-matched back with Seedream - square, matching the game's front art style and palette, strictly textless (an ornamental emblem/pattern from the game's motifs; "STRICTLY NO TEXT of any kind"). Compress it (Stage 7) to `card_back.jpg`.
+3. **Always donate a newly generated back to the library** (`cp card_back.jpg <library>/back_<theme>.jpg`, descriptive theme name) so future games with the same theme reuse it instead of generating - the library grows one matched back per theme.
+
+For localized builds (Stage 9): reuse the parent game's `card_back.jpg` - it is theme-matched by construction and language-neutral. If the parent has none, apply the same theme-match-first rules above (matched library back, else generate + donate). Localization never generates a new back when the parent already has one.
 
 ## Stage 6 — Generate card art in batches
 
@@ -153,10 +166,13 @@ Create the game:
 card0 game create "Game Name" --file manifest.json \
   --description "..." --language en --rules "..." \
   --min-players 2 --max-players 2 \
-  --theme "..." --setting "..." --mechanic "..." --vibe "..."
+  --theme "..." --setting "..." --mechanic "..." --vibe "..." \
+  --category Family --category Strategy \
+  --mechanic-tag Drafting --mechanic-tag "Set Collection" \
+  --minutes 20
 ```
 
-The command prints the new `gameId` and a default `deckId`. Switch to the game and verify:
+The four metadata flags are required for submission (`--category` and `--mechanic-tag` are repeatable, max 3 each, canonical values only; invalid ones fail with the accepted list). The command prints the new `gameId` and a default `deckId`. Switch to the game and verify:
 
 ```bash
 card0 game use <gameId>
@@ -168,6 +184,14 @@ For the cover:
 ```bash
 card0 game image upload <gameId> cover_en.jpg
 ```
+
+For the rule visual guide (optional, costs **50 credits**, takes up to a few minutes — storyboard then render):
+
+```bash
+card0 game rule-image generate <gameId>    # -> { workId, imageUrl, stale }
+```
+
+It produces a child-friendly 3:4 infographic of the rules (setup → turn flow → win condition), shown above the written rules in the app. The rules must be non-empty and the game still a draft. Credits are refunded automatically on any failure. Generate it **after** the rules text is final — editing rules afterwards marks the visual stale (visible in `card0 game show` as `ruleImageStale: true`); regenerate to refresh it. Do this per language variant, after that variant's rules are translated.
 
 For each card, you need its `cardId` from `card0 card list` (run after `card0 deck use <deckId>`). Then upload:
 
