@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import type { ForemanMessage } from '../types'
+import { ModelPicker } from '../models'
 
 interface Live {
   role: 'assistant'
@@ -173,10 +174,7 @@ export default function Chat() {
           </div>
         )}
         {messages.map((m) => (
-          <div key={m.id} className={`chat-msg ${m.role}`}>
-            <div className="chat-role">{m.role === 'user' ? 'you' : m.role === 'assistant' ? 'foreman' : 'system'}</div>
-            <div className="chat-bubble">{m.content}</div>
-          </div>
+          <MessageBubble key={m.id} role={m.role} content={m.content} ts={m.created_at} />
         ))}
         {store.process.length > 0 && (
           <div className="chat-process">
@@ -217,11 +215,12 @@ export default function Chat() {
         )}
       </div>
 
-      <div className="chat-input">
+      <div className="chat-composer">
         <textarea
+          className="chat-composer-input"
           value={draft}
           rows={Math.min(5, Math.max(1, draft.split('\n').length))}
-          placeholder={store.busy ? 'The foreman is working…' : 'Message the foreman… (Enter to send)'}
+          placeholder={store.busy ? 'The foreman is working…' : 'Message the foreman… (Enter to send, Shift+Enter for newline)'}
           disabled={store.busy}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
@@ -231,9 +230,45 @@ export default function Chat() {
             }
           }}
         />
-        <button className="primary" disabled={store.busy || !draft.trim()} onClick={send}>
-          Send
-        </button>
+        <div className="chat-composer-foot">
+          <div className="chat-composer-foot-left">
+            {store.busy && (
+              <span className="chat-working" title="The foreman is running">
+                <span className="status-dot" /> Working…
+              </span>
+            )}
+          </div>
+          <div className="chat-composer-foot-right">
+            <ModelPicker />
+            <button
+              className="primary chat-send"
+              disabled={store.busy || !draft.trim()}
+              onClick={send}
+            >
+              Send
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** A single message in the chat log: role avatar, name, bubble. The avatar
+ *  is a small colored circle with a one-letter initial — tighter than a full
+ *  icon, reads at a glance, matches Codex. */
+function MessageBubble({ role, content, ts }: { role: string; content: string; ts?: string }) {
+  const display = role === 'user' ? 'you' : role === 'assistant' ? 'foreman' : 'system'
+  const initial = display[0]?.toUpperCase() ?? '·'
+  return (
+    <div className={`chat-msg chat-msg-new ${role}`}>
+      <div className={`chat-avatar chat-avatar-${role}`}>{initial}</div>
+      <div className="chat-body">
+        <div className="chat-meta">
+          <span className="chat-name">{display}</span>
+          {ts && <span className="chat-time muted small">{ts.slice(11, 16)}</span>}
+        </div>
+        <div className="chat-bubble-new">{content}</div>
       </div>
     </div>
   )

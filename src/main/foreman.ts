@@ -50,7 +50,10 @@ const FOREMAN_PREAMBLE = [
   '  does not need to start anything.',
   '- Publishing stays a human action in the app - never claim to publish games.',
   '- Answers stay short and concrete: what you did, what came out, what you suggest next.',
-  '- Use only the lb CLI unless the user explicitly asks for something else.'
+  '- Use only the lb CLI unless the user explicitly asks for something else.',
+  '- Image-generation gate: if the user has DISABLED auto image generation for card art in',
+  '  Settings, builders will pause and ask the user before any card art call. When you',
+  '  describe a queued build to the user, mention that image generation requires their approval.'
 ].join('\n')
 
 export function sendForeman(message: string): { ok: boolean; error?: string } {

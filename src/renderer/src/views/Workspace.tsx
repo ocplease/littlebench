@@ -1,6 +1,9 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
-import type { Job, StreamEvent, Artifact, ProtocolArtifactRow, Message } from '../types'
+import type { ReactNode } from 'react'
+import type { Job, StreamEvent, Artifact, ProtocolArtifactRow, Message, Settings } from '../types'
 import { STAGE_LIST, PHASE_LIST, STATUS_LABEL } from '../types'
+import { ModelPicker } from '../models'
+import { formatRelative, formatElapsed } from '../format'
 
 interface Props {
   job: Job
@@ -12,7 +15,12 @@ interface GalleryImage extends Artifact {
   dataUrl: string
 }
 
-/** Game Workspace: tasks | activity | artifacts, with steering input. */
+type ArtifactTab = 'images' | 'files'
+
+/** Game Workspace: top header (status + next action) over a 3-column body
+ *  (phases | activity + composer | artifacts) with notices between. The new
+ *  layout pushes the most important info (status, next action) to the top and
+ *  demotes reference content (phases, artifact gallery) to dimmer side rails. */
 export default function Workspace({ job, onBack, onChanged }: Props) {
   const [events, setEvents] = useState<StreamEvent[]>([])
   const [gallery, setGallery] = useState<GalleryImage[]>([])
@@ -23,8 +31,11 @@ export default function Workspace({ job, onBack, onChanged }: Props) {
   const [notice, setNotice] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [attached, setAttached] = useState<string | null>(null)
-  const [modal, setModal] = useState<{ img: GalleryImage | null; text: { path: string; content: string } | null } | null>(null)
+  const [artifactTab, setArtifactTab] = useState<ArtifactTab>('images')
+  const [settings, setSettings] = useState<Settings | null>(null)
   const [expandedPhase, setExpandedPhase] = useState<string | null>(null)
+  const [now, setNow] = useState(Date.now())
+  const [modal, setModal] = useState<{ img: GalleryImage | null; text: { path: string; content: string } | null } | null>(null)
   const transcriptRef = useRef<HTMLDivElement>(null)
   const autoScrollRef = useRef(true)
 
@@ -52,6 +63,7 @@ export default function Workspace({ job, onBack, onChanged }: Props) {
     loadEvents()
     loadGallery()
     loadSide()
+    window.api.getSettings().then((s) => setSettings(s as Settings))
     const offs = [
       window.api.on('job:event', (payload) => {
         const p = payload as StreamEvent
@@ -68,14 +80,19 @@ export default function Workspace({ job, onBack, onChanged }: Props) {
         const p = payload as { jobId: string }
         if (p.jobId === job.id) onChanged()
       }),
-      window.api.on('jobs:changed', () => loadSide())
+      window.api.on('jobs:changed', () => loadSide()),
+      window.api.on('settings:changed', () => {
+        window.api.getSettings().then((s) => setSettings(s as Settings))
+      })
     ]
     const timer = setInterval(loadGallery, 4000)
     const liveTimer = setInterval(() => window.api.jobIsLive(job.id).then((l) => setLive(Boolean(l))), 3000)
+    const tickTimer = setInterval(() => setNow(Date.now()), 1000)
     return () => {
       offs.forEach((off) => off())
       clearInterval(timer)
       clearInterval(liveTimer)
+      clearInterval(tickTimer)
     }
   }, [job.id, loadEvents, loadGallery, loadSide, onChanged])
 
@@ -140,63 +157,95 @@ export default function Workspace({ job, onBack, onChanged }: Props) {
     if (content) setModal({ img: null, text: { path, content } })
   }
 
+  const nextAction = nextActionFor(job.status, !!live, job.card0_game_id ?? null, job.id)
+  const imageGateOn = settings?.autoImageGen === 'false'
+
+  // Phase progress counts
+  const phaseProgress = PHASE_LIST.map((p) => {
+    const states = p.stages.map((s) => stageStatus(s))
+    const done = states.every((s) => s === 'completed')
+    const running = states.includes('running')
+    return { phase: p, done, running, doneCount: states.filter((s) => s === 'completed').length, total: states.length }
+  })
+
+  // ---- file vs image split for artifacts rail
+  const fileArtifacts = protoArts.filter((a) => !/\.(png|jpe?g|webp)$/i.test(a.path))
+  const imageCount = gallery.length
+  const fileCount = fileArtifacts.length
+
   return (
-    <div className="workspace">
-      <div className="ws-header">
-        <button className="link" onClick={onBack}>← Factory</button>
-        <div className="ws-title">
-          <h2>{job.title}</h2>
-          <div className="muted small">
-            {STATUS_LABEL[job.status] ?? job.status}
-            {job.status === 'running' && ` · ${phaseLabelOf(job, protocol)}`}
-            {job.youtube_url && (
-              <>
-                {' · '}
-                <a href={job.youtube_url} target="_blank" rel="noreferrer">video</a>
-              </>
-            )}
-            {job.card0_game_id && <> · game {job.card0_game_id.slice(0, 8)}</>}
+    <div className="workspace workspace-new">
+      <div className="ws-header-new">
+        <div className="ws-header-new-left">
+          <button className="link" onClick={onBack}>← Factory</button>
+          <div className="ws-title-block">
+            <h2 className="ws-title-text">{job.title}</h2>
+            <div className="ws-title-sub muted small">
+              <span className={`status-pill status-pill-${job.status}`}>
+                {STATUS_LABEL[job.status] ?? job.status}
+              </span>
+              {job.status === 'running' && (
+                <>
+                  <span className="ws-dot">·</span>
+                  <span>{phaseLabelOf(job, protocol)}</span>
+                  <span className="ws-dot">·</span>
+                  <span>{formatElapsed(job.started_at, now)} elapsed</span>
+                </>
+              )}
+              {job.created_at && (
+                <>
+                  <span className="ws-dot">·</span>
+                  <span title={job.created_at}>started {formatRelative(job.created_at, now)}</span>
+                </>
+              )}
+              {job.model && (
+                <>
+                  <span className="ws-dot">·</span>
+                  <span className="ws-model-chip">{job.model}</span>
+                </>
+              )}
+              {job.youtube_url && (
+                <>
+                  <span className="ws-dot">·</span>
+                  <a href={job.youtube_url} target="_blank" rel="noreferrer">video ↗</a>
+                </>
+              )}
+              {job.card0_game_id && (
+                <>
+                  <span className="ws-dot">·</span>
+                  <span>game {job.card0_game_id.slice(0, 8)}</span>
+                </>
+              )}
+            </div>
           </div>
         </div>
-        <div className="job-actions">
-          {job.status === 'queued' && (
-            <button disabled={busy} onClick={() => act(() => window.api.startJob(job.id), 'Start')}>Start now</button>
-          )}
-          {live && (
-            <button className="danger" disabled={busy} onClick={() => act(() => window.api.stopJob(job.id), 'Stop')}>Stop</button>
-          )}
-          {(isReview || needsInput) && (
-            <>
-              <button className="primary" disabled={busy || needsInput} title={needsInput ? 'Answer the question first' : ''} onClick={() => act(() => window.api.approveJob(job.id), 'Submit')}>
-                Approve & publish
-              </button>
-              <button disabled={busy} onClick={() => act(() => window.api.discardJob(job.id), 'Discard')}>Discard</button>
-            </>
-          )}
-          {job.status === 'paused' && (
-            <button className="primary" disabled={busy} onClick={() => act(() => window.api.resumeJob(job.id), 'Resume')}>
-              Resume
+        <div className="ws-header-new-right">
+          {nextAction && (
+            <button
+              className={`ws-next-action ${nextAction.variant === 'primary' ? 'primary' : nextAction.variant === 'danger' ? 'danger' : 'ghost'}`}
+              disabled={busy}
+              onClick={() => act(nextAction.run, nextAction.label)}
+            >
+              {nextAction.label}
+              {nextAction.variant === 'ghost' ? <span className="ws-next-arrow">↗</span> : <span className="ws-next-arrow">→</span>}
             </button>
-          )}
-          {(job.status === 'failed' || job.status === 'interrupted' || job.status === 'discarded') && (
-            <button disabled={busy} onClick={() => act(() => window.api.restartJob(job.id), 'Restart')}>Restart</button>
-          )}
-          {job.status === 'submitted' && job.card0_game_id && (
-            <button disabled={busy} onClick={() => act(() => window.api.openGame(job.card0_game_id!), 'Open')}>Open in card0 ↗</button>
           )}
         </div>
       </div>
 
-      {notice && <div className="notice error">{notice}</div>}
-      {job.error && <div className="notice error">{job.error}</div>}
+      {(notice || (job.error && job.status !== 'needs_input')) && (
+        <div className="ws-notice ws-notice-error">
+          {notice ?? job.error}
+        </div>
+      )}
       {needsInput && job.needs_input && (
-        <div className="notice warn">
-          <strong>The builder needs your decision:</strong>{' '}
-          {safeQuestion(job.needs_input)} — answer in the box below and send.
+        <div className="ws-notice ws-notice-warn">
+          <strong>The builder needs your decision.</strong>{' '}
+          {safeQuestion(job.needs_input)} — answer in the composer below.
         </div>
       )}
       {isReview && result?.imperfections && result.imperfections.length > 0 && (
-        <div className="notice info">
+        <div className="ws-notice ws-notice-info">
           <strong>Builder flagged {result.imperfections.length} things to check:</strong>
           <ul className="imperfections">
             {result.imperfections.map((s, i) => (
@@ -206,49 +255,53 @@ export default function Workspace({ job, onBack, onChanged }: Props) {
         </div>
       )}
 
-      <div className="ws-body">
-        <div className="ws-tasks">
-          <h3>Tasks</h3>
-          {PHASE_LIST.map((p) => {
-            const stageStates = p.stages.map((s) => stageStatus(s))
-            const done = stageStates.every((s) => s === 'completed')
-            const running = stageStates.includes('running')
-            const open = expandedPhase === p.id
-            return (
-              <div key={p.id} className={`phase ${done ? 'done' : ''} ${running ? 'running' : ''}`}>
-                <button className="phase-head" onClick={() => setExpandedPhase(open ? null : p.id)}>
-                  <span className="phase-mark">{done ? '✓' : running ? '●' : '○'}</span>
-                  <span className="phase-name">{p.label}</span>
-                  <span className="muted small">{p.detail}</span>
-                  <span className="phase-caret">{open ? '▾' : '▸'}</span>
-                </button>
-                {open && (
-                  <div className="phase-stages">
-                    {p.stages.map((s) => {
-                      const st = STAGE_LIST.find((x) => x.id === s)
-                      const status = stageStatus(s)
-                      return (
-                        <div key={s} className={`stage-row status-${status}`}>
-                          <span className="stage-mark">{status === 'completed' ? '✓' : status === 'running' ? '●' : '○'}</span>
-                          {st?.label ?? s}
-                          {protocol?.stages.find((x) => x.id === s)?.detail && (
-                            <span className="muted small"> {protocol.stages.find((x) => x.id === s)!.detail}</span>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-            )
-          })}
-          {protocol?.note && <div className="protocol-note muted small">“{protocol.note}”</div>}
-        </div>
+      <div className="ws-body-3col">
+        <aside className="ws-rail ws-rail-left">
+          <div className="ws-rail-head">
+            <span className="ws-rail-title">Phases</span>
+            {protocol?.note && <span className="muted small" title={protocol.note}>“{protocol.note.slice(0, 28)}{protocol.note.length > 28 ? '…' : ''}”</span>}
+          </div>
+          <div className="ws-rail-body">
+            {phaseProgress.map(({ phase: p, done, running, doneCount, total }) => {
+              const open = expandedPhase === p.id
+              return (
+                <div key={p.id} className={`phase-step ${done ? 'is-done' : ''} ${running ? 'is-running' : ''} ${open ? 'is-open' : ''}`}>
+                  <button className="phase-step-head" onClick={() => setExpandedPhase(open ? null : p.id)}>
+                    <span className="phase-step-mark">{done ? '✓' : running ? '●' : '○'}</span>
+                    <span className="phase-step-name">{p.label}</span>
+                    <span className="phase-step-count muted small">{doneCount}/{total}</span>
+                    <span className="phase-step-caret">{open ? '▾' : '▸'}</span>
+                  </button>
+                  {open && (
+                    <div className="phase-step-stages">
+                      {p.stages.map((s) => {
+                        const st = STAGE_LIST.find((x) => x.id === s)
+                        const status = stageStatus(s)
+                        return (
+                          <div key={s} className={`phase-stage-row status-${status}`}>
+                            <span className="phase-stage-mark">{status === 'completed' ? '✓' : status === 'running' ? '●' : '○'}</span>
+                            <span className="phase-stage-label">{st?.label ?? s}</span>
+                            {protocol?.stages.find((x) => x.id === s)?.detail && (
+                              <span className="muted small">{protocol.stages.find((x) => x.id === s)!.detail}</span>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </aside>
 
-        <div className="ws-activity">
-          <h3>Activity</h3>
+        <section className="ws-center">
+          <div className="ws-center-head">
+            <span className="ws-rail-title">Activity</span>
+            <span className="muted small">{events.length} events</span>
+          </div>
           <div
-            className="transcript"
+            className="activity-stream"
             ref={transcriptRef}
             onWheel={() => {
               const el = transcriptRef.current
@@ -260,82 +313,122 @@ export default function Workspace({ job, onBack, onChanged }: Props) {
               <TranscriptLine key={i} evt={e} />
             ))}
           </div>
-        </div>
+          <div className="ws-composer">
+            {messages.length > 0 && (
+              <div className="msg-history">
+                {messages.slice(-2).map((m) => (
+                  <div key={m.id} className="msg-bubble">
+                    <span className="msg-role">you</span> {m.content.slice(0, 120)}
+                    {m.artifact_path && <span className="muted small"> ↳ {m.artifact_path.split('/').pop()}</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+            {attached && (
+              <div className="attachment">
+                attached: {attached.split('/').pop()}{' '}
+                <button className="link" onClick={() => setAttached(null)}>remove</button>
+              </div>
+            )}
+            <textarea
+              className="ws-composer-input"
+              rows={2}
+              value={draft}
+              placeholder={
+                needsInput
+                  ? 'Reply to the builder\'s question…'
+                  : live
+                    ? 'Builder is working - steering unlocks when this pass finishes…'
+                    : steerable
+                      ? 'Ask or redirect the builder… ("make this card less dark", "fix the rule for X")'
+                      : 'Queue the job first to start a session…'
+              }
+              disabled={live || !steerable}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  send()
+                }
+              }}
+            />
+            <div className="ws-composer-foot">
+              <div className="ws-composer-foot-left">
+                {imageGateOn && (
+                  <span className="ws-composer-note muted small" title="Cover and game rules still auto-generate">
+                    ⓘ Card images require your approval
+                  </span>
+                )}
+              </div>
+              <div className="ws-composer-foot-right">
+                <ModelPicker />
+                <button
+                  className="primary ws-send"
+                  disabled={live || !steerable || !draft.trim()}
+                  onClick={send}
+                >
+                  Send
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
 
-        <div className="ws-artifacts">
-          <h3>Artifacts</h3>
-          {protoArts.length > 0 && (
-            <div className="artifact-chips">
-              {protoArts
-                .filter((a) => !/\.(png|jpe?g|webp)$/i.test(a.path))
-                .map((a) => (
+        <aside className="ws-rail ws-rail-right">
+          <div className="ws-rail-head">
+            <span className="ws-rail-title">Artifacts</span>
+            <div className="ws-rail-tabs" role="tablist">
+              <button
+                role="tab"
+                aria-selected={artifactTab === 'images'}
+                className={artifactTab === 'images' ? 'is-active' : ''}
+                onClick={() => setArtifactTab('images')}
+              >
+                Images {imageCount > 0 ? `· ${imageCount}` : ''}
+              </button>
+              <button
+                role="tab"
+                aria-selected={artifactTab === 'files'}
+                className={artifactTab === 'files' ? 'is-active' : ''}
+                onClick={() => setArtifactTab('files')}
+              >
+                Files {fileCount > 0 ? `· ${fileCount}` : ''}
+              </button>
+            </div>
+          </div>
+          <div className="ws-rail-body">
+            {artifactTab === 'images' ? (
+              gallery.length === 0 ? (
+                <div className="empty">No images yet — they appear as the builder generates them.</div>
+              ) : (
+                <div className="artifact-grid">
+                  {gallery.map((g) => (
+                    <figure
+                      key={g.rel}
+                      className="artifact-item"
+                      onClick={() => setModal({ img: g, text: null })}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => e.key === 'Enter' && setModal({ img: g, text: null })}
+                    >
+                      <img src={g.dataUrl} alt={g.file} loading="lazy" />
+                    </figure>
+                  ))}
+                </div>
+              )
+            ) : fileArtifacts.length === 0 ? (
+              <div className="empty">No file artifacts yet.</div>
+            ) : (
+              <div className="artifact-chips">
+                {fileArtifacts.map((a) => (
                   <button key={a.id} className="artifact-chip" onClick={() => openText(a.path)} title={a.path}>
                     {a.label ?? a.type}: {a.path.split('/').pop()}
                   </button>
                 ))}
-            </div>
-          )}
-          {gallery.length === 0 ? (
-            <div className="empty">No images yet - they appear as the builder generates them.</div>
-          ) : (
-            <div className="artifact-grid">
-              {gallery.map((g) => (
-                <figure
-                  key={g.rel}
-                  className="artifact-item"
-                  onClick={() => setModal({ img: g, text: null })}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => e.key === 'Enter' && setModal({ img: g, text: null })}
-                >
-                  <img src={g.dataUrl} alt={g.file} loading="lazy" />
-                  <figcaption className="muted small ellipsis">{g.rel}</figcaption>
-                </figure>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="ws-input">
-        {messages.length > 0 && (
-          <div className="msg-history">
-            {messages.slice(-3).map((m) => (
-              <div key={m.id} className="msg-bubble">
-                <span className="msg-role">you</span> {m.content.slice(0, 120)}
-                {m.artifact_path && <span className="muted small"> ↳ {m.artifact_path.split('/').pop()}</span>}
               </div>
-            ))}
+            )}
           </div>
-        )}
-        {attached && (
-          <div className="attachment">
-            attached: {attached.split('/').pop()} <button className="link" onClick={() => setAttached(null)}>remove</button>
-          </div>
-        )}
-        <div className="input-row">
-          <input
-            value={draft}
-            placeholder={
-              live
-                ? 'Builder is working - steering unlocks when this pass finishes…'
-                : steerable
-                  ? 'Ask or redirect the builder… ("make this card less dark", "fix the rule for X")'
-                  : 'Queue the job first to start a session…'
-            }
-            disabled={live || !steerable}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                send()
-              }
-            }}
-          />
-          <button className="primary" disabled={live || !steerable || !draft.trim()} onClick={send}>
-            Send
-          </button>
-        </div>
+        </aside>
       </div>
 
       {modal?.img && (
@@ -383,6 +476,36 @@ export default function Workspace({ job, onBack, onChanged }: Props) {
       )}
     </div>
   )
+}
+
+type ActionVariant = 'primary' | 'danger' | 'ghost'
+
+function nextActionFor(
+  status: string,
+  live: boolean,
+  gameId: string | null,
+  jobId: string
+): { label: string; variant: ActionVariant; run: () => Promise<unknown> } | null {
+  if (status === 'needs_input') return null // user must reply in composer
+  if (status === 'queued') {
+    return { label: 'Start now', variant: 'primary', run: () => window.api.startJob(jobId) }
+  }
+  if (status === 'running' || live) {
+    return { label: 'Stop', variant: 'danger', run: () => window.api.stopJob(jobId) }
+  }
+  if (status === 'paused') {
+    return { label: 'Resume', variant: 'primary', run: () => window.api.resumeJob(jobId) }
+  }
+  if (status === 'awaiting_review') {
+    return { label: 'Approve & publish', variant: 'primary', run: () => window.api.approveJob(jobId) }
+  }
+  if (status === 'failed' || status === 'interrupted' || status === 'discarded') {
+    return { label: 'Restart', variant: 'primary', run: () => window.api.restartJob(jobId) }
+  }
+  if (status === 'submitted' && gameId) {
+    return { label: 'Open in card0', variant: 'ghost', run: () => window.api.openGame(gameId) }
+  }
+  return null
 }
 
 function phaseLabelOf(job: Job, protocol: { phase: string } | null): string {
@@ -440,44 +563,111 @@ function TranscriptLine({ evt }: { evt: StreamEvent }) {
   }
   const message = ev.message as { role?: string; content?: unknown } | undefined
   if (!message || !Array.isArray(message.content)) return null
-  return (
-    <>
-      {message.content.map((block, i) => {
-        if (!block || typeof block !== 'object') return null
-        const b = block as { type?: string; name?: string; text?: string; input?: unknown; content?: unknown; is_error?: boolean }
-        if (b.type === 'text' && b.text) {
-          return (
-            <div key={i} className={`tl text ${message.role === 'assistant' ? 'assistant' : 'user'}`}>
-              {message.role === 'assistant' ? '◆ ' : '◇ '}
-              {b.text}
+  const blocks = message.content
+    .filter((b): b is Record<string, unknown> => !!b && typeof b === 'object')
+    .map((b) => b as { type?: string; name?: string; text?: string; input?: unknown; content?: unknown; is_error?: boolean })
+
+  // Codex-style: a single assistant turn can fire many tool calls. Group
+  // consecutive tool_use blocks (and their results) into one summary row so
+  // the activity feed reads as a sequence of "what the agent just did"
+  // rather than a wall of one-line tool entries.
+  const rows: Array<{ key: string; node: ReactNode }> = []
+  let i = 0
+  let groupIdx = 0
+  while (i < blocks.length) {
+    const b = blocks[i]
+    if (b.type === 'text' && b.text) {
+      rows.push({
+        key: `t${i}`,
+        node: (
+          <div className={`tl-bubble tl-text tl-${message.role ?? 'unknown'}`}>
+            {b.text}
+          </div>
+        )
+      })
+      i++
+      continue
+    }
+    if (b.type === 'tool_use') {
+      // Consume a run of tool_use + tool_result pairs.
+      const start = i
+      const tools: Array<{ name: string; input: unknown; resultError?: boolean; resultText?: string }> = []
+      while (i < blocks.length && blocks[i].type === 'tool_use') {
+        const tool = blocks[i]
+        // Look ahead for the matching tool_result (Claude pairs them).
+        const next = blocks[i + 1]
+        const result = next && next.type === 'tool_result' ? next : null
+        const resultText = result ? resultSummary(result.content) : ''
+        tools.push({
+          name: String(tool.name ?? 'tool'),
+          input: tool.input,
+          resultError: Boolean(result?.is_error),
+          resultText
+        })
+        i += result ? 2 : 1
+      }
+      const summary = toolGroupSummary(tools)
+      rows.push({
+        key: `g${groupIdx++}`,
+        node: (
+          <details className="tl-bubble tl-tool-group">
+            <summary>
+              <span className="tool-badge">⚙</span>
+              <span>{summary}</span>
+            </summary>
+            <div className="tl-tool-list">
+              {tools.map((t, k) => (
+                <div key={k} className={`tl-tool-row ${t.resultError ? 'is-error' : ''}`}>
+                  <span className="tl-tool-name">{t.name}</span>
+                  <span className="muted small tl-tool-input">{inputSummary(t.input)}</span>
+                  {t.resultText && (
+                    <span className={`tl-tool-result-text ${t.resultError ? 'error' : ''} muted small`}>
+                      → {t.resultError ? 'error: ' : ''}{t.resultText.replace(/\s+/g, ' ').slice(0, 140)}
+                    </span>
+                  )}
+                </div>
+              ))}
             </div>
-          )
-        }
-        if (b.type === 'tool_use') {
-          return (
-            <details key={i} className="tl tool">
-              <summary>
-                <span className="tool-badge">tool</span> {b.name}
-                <span className="muted small"> {inputSummary(b.input)}</span>
-              </summary>
-              <pre>{safeJson(b.input)}</pre>
-            </details>
-          )
-        }
-        if (b.type === 'tool_result') {
-          return (
-            <details key={i} className={`tl tool-result ${b.is_error ? 'error' : ''}`}>
-              <summary>
-                <span className="tool-badge result-badge">result</span>
-              </summary>
-              <pre>{resultSummary(b.content)}</pre>
-            </details>
-          )
-        }
-        return null
-      })}
-    </>
-  )
+          </details>
+        )
+      })
+      // (start kept for future debugging hooks)
+      void start
+      continue
+    }
+    // tool_result with no preceding tool_use (rare); render collapsed.
+    if (b.type === 'tool_result') {
+      rows.push({
+        key: `r${i}`,
+        node: (
+          <div className={`tl-bubble tl-tool-orphan muted small ${b.is_error ? 'error' : ''}`}>
+            ↳ {resultSummary(b.content).slice(0, 200)}
+          </div>
+        )
+      })
+      i++
+      continue
+    }
+    i++
+  }
+  return <>{rows.map((r) => <div key={r.key}>{r.node}</div>)}</>
+}
+
+/** Build a Codex-style one-liner: "Used Bash, Read, Edit" or "Ran 5 tools". */
+function toolGroupSummary(tools: Array<{ name: string }>): string {
+  if (tools.length === 0) return 'tool use'
+  if (tools.length === 1) return `Ran ${tools[0].name}`
+  const names = tools.map((t) => t.name)
+  const seen = new Set<string>()
+  const ordered: string[] = []
+  for (const n of names) {
+    if (!seen.has(n)) {
+      seen.add(n)
+      ordered.push(n)
+    }
+  }
+  if (ordered.length <= 3) return `Used ${ordered.join(', ')}`
+  return `Ran ${tools.length} tools (${ordered.slice(0, 3).join(', ')}, …)`
 }
 
 function text(ev: Record<string, unknown>): string {

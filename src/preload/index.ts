@@ -49,6 +49,13 @@ const api: WorkbenchApi = {
   foremanBusy: () => ipcRenderer.invoke('foreman:busy'),
   foremanReset: () => ipcRenderer.invoke('foreman:reset'),
 
+  // card0 account / auth
+  card0AccountInfo: () => ipcRenderer.invoke('card0:accountInfo'),
+  card0LoginWeb: (opts) => ipcRenderer.invoke('card0:loginWeb', opts),
+  card0LoginOtpSend: (email) => ipcRenderer.invoke('card0:loginOtpSend', email),
+  card0LoginOtpVerify: (email, code) => ipcRenderer.invoke('card0:loginOtpVerify', email, code),
+  card0Logout: () => ipcRenderer.invoke('card0:logout'),
+
   // live updates from main
   on: (channel, cb) => {
     const listener = (_e: Electron.IpcRendererEvent, payload: unknown) => cb(payload)

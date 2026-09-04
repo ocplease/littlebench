@@ -9,6 +9,7 @@ import { installSkills } from './skills'
 import { parseProtocol, applyProtocol, PROTOCOL_CONTRACT } from './protocol'
 import { agentEnv, coolKey, claudeKeysAvailable, parseQuotaReset } from './keys'
 import { insertMessage } from './db'
+import { isAuthRequiredError } from './card0-auth'
 import {
   getJob, getSetting, setSetting, insertJob, listJobs, updateJob, appendEvent, upsertGame,
   listEvents, deleteJobRows, JobRow
@@ -119,6 +120,26 @@ const NO_IMAGE_INPUT = [
   '  python3 PIL. A human reviews all art visually in the workbench gallery before submit.'
 ].join('\n')
 
+/** When the user disables auto image generation, every prompt gets a rule telling
+ *  the agent to PAUSE and ask the user before any card art call (cover and rules
+ *  are still auto). The agent writes a needs_input entry to tasks.json and stops;
+ *  the user answers in the workspace composer via steerJob, and the agent resumes. */
+function imageGenGate(): string {
+  if (getSetting('autoImageGen', 'true') !== 'false') return ''
+  return [
+    '- IMAGE-GENERATION GATE: the user has DISABLED auto image generation for card art.',
+    '  The cover image and game-rule visuals still generate automatically, but BEFORE calling',
+    '  the byted-ark-seedream-skill for any other card art (animal cards, score cards, token cards,',
+    '  or any custom card image), you MUST get explicit user confirmation. Either:',
+    '    (a) write a needs_input entry to .workbench/tasks.json with a question listing the',
+    '        specific cards you want to generate, then STOP and wait; OR',
+    '    (b) finish your turn with a clear question to the user and wait for their reply in',
+    '        the workbench chat.',
+    '  Do not call byted-ark-seedream-skill for card art until the user confirms. The user\'s',
+    '  reply arrives via the same session and you should continue from there.'
+  ].join('\n')
+}
+
 export function buildGamePrompt(job: JobRow): string {
   // Design-brief job (no video): the human already specified the game in
   // design_brief.md in the workspace - build straight from that.
@@ -145,8 +166,9 @@ export function buildGamePrompt(job: JobRow): string {
       '  workspace. Only generate a new back if none fits the theme - and then also cp the new',
       '  back into that library (descriptive theme name) so future games reuse it.',
       NO_IMAGE_INPUT,
-      PROTOCOL_CONTRACT
-    ].join('\n')
+      PROTOCOL_CONTRACT,
+      imageGenGate()
+    ].filter(Boolean).join('\n')
   }
   const lines = [
     'You are running inside an automated workbench. Create a card0 game from this video:',
@@ -169,9 +191,10 @@ export function buildGamePrompt(job: JobRow): string {
     '  workspace. Only generate a new back if none fits the theme - and then also cp the new',
     '  back into that library (descriptive theme name) so future games reuse it.',
     NO_IMAGE_INPUT,
+    imageGenGate(),
     PROTOCOL_CONTRACT
   ]
-  return lines.join('\n')
+  return lines.filter(Boolean).join('\n')
 }
 
 export function buildLocalizePrompt(parent: JobRow, language: 'zh-Hans' | 'ja'): string {
@@ -193,11 +216,58 @@ export function buildLocalizePrompt(parent: JobRow, language: 'zh-Hans' | 'ja'):
     '- CRITICAL: Do NOT run `card0 game submit`. A human reviews the cards first.',
     '- Write result.json in this directory with the same shape as the English job.',
     NO_IMAGE_INPUT,
-    PROTOCOL_CONTRACT
-  ].join('\n')
+    PROTOCOL_CONTRACT,
+    imageGenGate()
+  ].filter(Boolean).join('\n')
 }
 
 // ---------- job lifecycle ----------
+
+/** Defensive title cleanup. Callers (the foreman agent, a stale script, a CLI
+ *  paste) sometimes hand us the literal stdout of a help command - "Usage:
+ *  yt-dlp [OPTIONS] URL [URL...]" is a real example. That text then shows up
+ *  on the Factory card and as the workspace title, which is unreadable. We
+ *  detect CLI usage / error / stack-trace text and substitute a meaningful
+ *  fallback derived from the youtube URL when we have one. */
+export function sanitizeTitle(raw: string | null | undefined, opts: { youtubeUrl?: string | null } = {}): string {
+  const t = (raw ?? '').trim()
+  // A real title is short, has no newlines, and is not a help/error header.
+  if (t && isHumanTitle(t)) return t.slice(0, 240)
+  // Fall back to a derived name so the card shows something useful.
+  if (opts.youtubeUrl) {
+    const id = extractYouTubeId(opts.youtubeUrl)
+    if (id) return `YouTube ${id}`
+  }
+  return t ? t.slice(0, 120) : 'Untitled video'
+}
+
+function isHumanTitle(t: string): boolean {
+  if (!t) return false
+  if (t.length > 240) return false
+  if (t.includes('\n')) return false
+  const lower = t.toLowerCase()
+  // Common CLI help / error patterns. Match the start of the string.
+  if (/^(usage|error|traceback|exception|fatal|panic)[:\s]/i.test(t)) return false
+  if (/\[options\]/i.test(t)) return false // yt-dlp, ffmpeg, curl
+  if (/^ytdlp|^yt-dlp\b/i.test(t)) return false
+  if (/^\s*at\s+\S+\s+\(.+\.js:\d+:\d+\)\s*$/m.test(t)) return false // node stack frame on its own
+  return true
+}
+
+/** Pull a YouTube video id (11-char) from any common URL shape. */
+function extractYouTubeId(url: string): string | null {
+  try {
+    const u = new URL(url)
+    if (u.hostname === 'youtu.be') return u.pathname.replace(/^\//, '').slice(0, 11) || null
+    if (u.hostname.endsWith('youtube.com')) {
+      const v = u.searchParams.get('v')
+      if (v) return v.slice(0, 11)
+      const m = u.pathname.match(/\/(shorts|embed|v)\/([^/?#]+)/)
+      if (m) return m[2].slice(0, 11)
+    }
+  } catch { /* not a URL */ }
+  return null
+}
 
 export function createJob(input: {
   video_id?: number | null
@@ -210,13 +280,19 @@ export function createJob(input: {
   autostart?: boolean
 }): string {
   const id = `job_${Date.now().toString(36)}_${randomUUID().slice(0, 8)}`
+  // Capture the active model at queue time so the Factory card can show what ran
+  // this build, even after the user changes the setting later. Empty -> null so
+  // the renderer renders "—" instead of a stray empty chip.
+  const model = getSetting('model', 'minimax-m3').trim() || null
+  const title = sanitizeTitle(input.title, { youtubeUrl: input.youtube_url ?? null })
   insertJob({
     id,
     video_id: input.video_id ?? null,
-    title: input.title,
+    title,
     youtube_url: input.youtube_url ?? null,
     language: input.language ?? 'en',
-    parent_job_id: input.parent_job_id ?? null
+    parent_job_id: input.parent_job_id ?? null,
+    model
   })
   mkdirSync(jobWorkspace(id), { recursive: true })
   emit('jobs:changed', null)
@@ -294,7 +370,7 @@ export function executeJobWithPrompt(
   mkdirSync(path.join(workspace, '.workbench'), { recursive: true })
   installSkills(workspace) // project-level skills for the headless session
 
-  const model = getSetting('model', '')
+  const model = getSetting('model', 'minimax-m3')
   const bypass = getSetting('bypassPermissions', 'true') === 'true'
 
   updateJob(jobId, { status: 'running', started_at: new Date().toISOString(), error: null })
@@ -553,7 +629,8 @@ export function syncJobStatus(jobId: string): { ok: boolean; status?: string; er
     }
     return { ok: true, status: remote.status ?? 'draft' }
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    const raw = e instanceof Error ? e.message : String(e)
+    return { ok: false, error: rewriteCard0Error(raw) }
   }
 }
 
@@ -575,7 +652,8 @@ export function approveJob(jobId: string): { ok: boolean; error?: string } {
     pumpQueue()
     return { ok: true, error: out.slice(0, 500) }
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    const raw = e instanceof Error ? e.message : String(e)
+    return { ok: false, error: rewriteCard0Error(raw) }
   }
 }
 
@@ -730,6 +808,16 @@ export function openGame(gameId: string): { ok: boolean; error?: string } {
     })
     return { ok: true }
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    const raw = e instanceof Error ? e.message : String(e)
+    return { ok: false, error: rewriteCard0Error(raw) }
   }
+}
+
+/** Friendly rewrite for the common "session expired" failure from the card0
+ *  CLI. Anything else is returned as-is. */
+function rewriteCard0Error(raw: string): string {
+  if (isAuthRequiredError(raw)) {
+    return 'card0 session expired — open Settings to sign in.'
+  }
+  return raw
 }

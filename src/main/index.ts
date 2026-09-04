@@ -9,6 +9,7 @@ import { ingestChannel, scoutVideos, deepScoutVideo } from './ingest'
 import { updateVideoStatus, updateVideoScout, deleteVideo } from './db'
 import { setForemanBroadcast, sendForeman, foremanBusy, resetForeman } from './foreman'
 import { keyPoolStatus } from './keys'
+import { card0AccountInfo, card0LoginWeb, card0LoginOtpSend, card0LoginOtpVerify, card0Logout, setCard0Broadcast } from './card0-auth'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -49,7 +50,7 @@ function handle(channel: string, fn: (...args: any[]) => any): void {
 
 function registerIpc(): void {
   handle('settings:get', () => ({
-    model: getSetting('model', ''),
+    model: getSetting('model', 'minimax-m3'),
     triageModel: getSetting('triageModel', 'haiku'),
     autoQueue: getSetting('autoQueue', 'true'),
     bypassPermissions: getSetting('bypassPermissions', 'true'),
@@ -59,7 +60,8 @@ function registerIpc(): void {
     autoLocalize: getSetting('autoLocalize', 'true'),
     claudeApiKeys: getSetting('claude_api_keys', ''),
     imageApiKeys: getSetting('image_api_keys', ''),
-    keyPool: keyPoolStatus()
+    keyPool: keyPoolStatus(),
+    autoImageGen: getSetting('autoImageGen', 'true') as 'true' | 'false'
   }))
   handle('settings:set', (s: Record<string, string>) => {
     // The renderer speaks camelCase; these DB rows are snake_case. Translate,
@@ -70,8 +72,11 @@ function registerIpc(): void {
     }
     for (const [k, v] of Object.entries(s)) {
       if (k === 'quotaUntil') continue // runtime quota state, not a setting
-      if (typeof v !== 'string') continue // e.g. keyPool snapshot, read-only
-      setSetting(keyMap[k] ?? k, v)
+      if (k === 'keyPool') continue // snapshot, not a setting
+      if (typeof v !== 'string') continue
+      let value = v
+      if (k === 'autoImageGen' && value !== 'true' && value !== 'false') value = 'true'
+      setSetting(keyMap[k] ?? k, value)
     }
     broadcast('settings:changed', null)
     return true
@@ -227,6 +232,14 @@ function registerIpc(): void {
   handle('foreman:messages', () => listForemanMessages())
   handle('foreman:busy', () => foremanBusy())
   handle('foreman:reset', () => resetForeman())
+
+  // ---------- card0 account / auth ----------
+
+  handle('card0:accountInfo', () => card0AccountInfo())
+  handle('card0:loginWeb', (opts?: { provider?: 'google' }) => card0LoginWeb(opts ?? {}))
+  handle('card0:loginOtpSend', (email: string) => card0LoginOtpSend(email))
+  handle('card0:loginOtpVerify', (email: string, code: string) => card0LoginOtpVerify(email, code))
+  handle('card0:logout', () => card0Logout())
 }
 
 // ---------- lifecycle ----------
@@ -237,6 +250,7 @@ app.whenReady().then(() => {
   getDb()
   setBroadcast(broadcast)
   setForemanBroadcast(broadcast)
+  setCard0Broadcast(broadcast)
   registerIpc()
   createWindow()
 

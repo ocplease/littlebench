@@ -53,6 +53,8 @@ export interface JobRow {
   /** workbench protocol (tasks.json) fields */
   phase: string | null
   needs_input: string | null
+  /** which Claude model the agent was launched with; null for legacy rows */
+  model: string | null
 }
 
 let db: DatabaseSync | null = null
@@ -99,7 +101,8 @@ function migrate(db: DatabaseSync): void {
       result_json TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       started_at TEXT,
-      finished_at TEXT
+      finished_at TEXT,
+      model TEXT
     );
 
     CREATE TABLE IF NOT EXISTS events (
@@ -166,7 +169,8 @@ function migrate(db: DatabaseSync): void {
     ['videos', 'rights_status', 'TEXT'],
     ['videos', 'thumbnail_url', 'TEXT'],
     ['jobs', 'phase', 'TEXT'],
-    ['jobs', 'needs_input', 'TEXT']
+    ['jobs', 'needs_input', 'TEXT'],
+    ['jobs', 'model', 'TEXT']
   ]
   for (const [table, col, type] of addColumns) {
     const cols = db.prepare(`PRAGMA table_info(${table})`).all() as unknown as Array<{ name: string }>
@@ -263,13 +267,22 @@ export function insertJob(job: {
   youtube_url: string | null
   language?: string
   parent_job_id?: string | null
+  model?: string | null
 }): void {
   getDb()
     .prepare(
-      `INSERT INTO jobs (id, video_id, title, youtube_url, language, parent_job_id, status)
-       VALUES (?, ?, ?, ?, ?, ?, 'queued')`
+      `INSERT INTO jobs (id, video_id, title, youtube_url, language, parent_job_id, model, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'queued')`
     )
-    .run(job.id, job.video_id, job.title, job.youtube_url, job.language ?? 'en', job.parent_job_id ?? null)
+    .run(
+      job.id,
+      job.video_id,
+      job.title,
+      job.youtube_url,
+      job.language ?? 'en',
+      job.parent_job_id ?? null,
+      job.model ?? null
+    )
 }
 
 export function listJobs(): JobRow[] {
@@ -285,7 +298,8 @@ export function getJob(id: string): JobRow | undefined {
 export function updateJob(id: string, fields: Partial<JobRow>): void {
   const allowed: Array<keyof JobRow> = [
     'status', 'stage', 'stage_detail', 'error', 'card0_game_id',
-    'result_json', 'session_id', 'started_at', 'finished_at', 'phase', 'needs_input'
+    'result_json', 'session_id', 'started_at', 'finished_at', 'phase', 'needs_input',
+    'model'
   ]
   const sets: string[] = []
   const vals: unknown[] = []

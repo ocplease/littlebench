@@ -39,6 +39,8 @@ export interface Job {
   /** workbench protocol */
   phase: string | null
   needs_input: string | null
+  /** which Claude model the agent was launched with; null for legacy rows */
+  model: string | null
 }
 
 export interface Game {
@@ -91,6 +93,7 @@ export interface Settings {
   claudeApiKeys: string
   imageApiKeys: string
   keyPool: { total: number; cooling: number; nextAvailable?: string }
+  autoImageGen: 'true' | 'false'
 }
 
 export interface IngestResult {
@@ -102,6 +105,21 @@ export interface ApproveResult {
   ok: boolean
   error?: string
 }
+
+export interface Card0Account {
+  id?: string
+  email?: string
+  name?: string
+  [key: string]: unknown
+}
+
+export type Card0AccountInfo =
+  | { ok: true; account: Card0Account }
+  | { ok: false; reason: 'auth_required' | 'unknown'; message: string }
+
+export type Card0AuthResult =
+  | { ok: true; url?: string }
+  | { ok: false; error: string }
 
 export interface ForemanMessage {
   id: number
@@ -153,6 +171,13 @@ export interface WorkbenchApi {
   foremanMessages(): Promise<ForemanMessage[]>
   foremanBusy(): Promise<boolean>
   foremanReset(): Promise<void>
+
+  // card0 account / auth
+  card0AccountInfo(): Promise<Card0AccountInfo>
+  card0LoginWeb(opts?: { provider?: 'google' }): Promise<Card0AuthResult>
+  card0LoginOtpSend(email: string): Promise<Card0AuthResult>
+  card0LoginOtpVerify(email: string, code: string): Promise<Card0AuthResult>
+  card0Logout(): Promise<Card0AuthResult>
 
   on(channel: string, cb: (payload: unknown) => void): () => void
 }

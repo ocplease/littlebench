@@ -1,4 +1,7 @@
-export type { Video, Job, Game, Artifact, ProtocolArtifactRow, Message, Settings, ForemanMessage } from '../../preload/api-types'
+export type {
+  Video, Job, Game, Artifact, ProtocolArtifactRow, Message, Settings, ForemanMessage,
+  Card0Account, Card0AccountInfo, Card0AuthResult
+} from '../../preload/api-types'
 export type { StreamEvent } from './stream-event'
 
 export const STAGE_LIST = [

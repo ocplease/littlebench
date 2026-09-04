@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { Job, Video, Game } from '../types'
 import { STAGE_LIST, phaseLabel, STATUS_LABEL } from '../types'
+import { formatRelative, formatElapsed, channelPalette } from '../format'
 
 interface Props {
   jobs: Job[]
@@ -16,8 +17,9 @@ interface Props {
   onGoSources: () => void
 }
 
-/** Board column: shows the first `initial` items, then expands in +5 steps.
- *  Job columns pass `selection` to get a select-all checkbox in the header. */
+/** Board column: scrollable list with a uniform-height card. No per-column
+ *  `+5 more` collapse - the unified card skeleton means all rows are the same
+ *  height, so scrolling inside the column is enough. */
 function Column<T>({ title, className, items, empty, render, selection }: {
   title: string
   className?: string
@@ -26,9 +28,6 @@ function Column<T>({ title, className, items, empty, render, selection }: {
   render: (item: T, index: number) => ReactNode
   selection?: { ids: string[]; selected: Set<string>; toggleAll: (ids: string[]) => void }
 }) {
-  const [limit, setLimit] = useState(10)
-  const visible = items.slice(0, limit)
-  const hidden = items.length - visible.length
   const allSelected = !!selection && selection.ids.length > 0 && selection.ids.every((id) => selection.selected.has(id))
   return (
     <section className={`board-col ${className ?? ''}`}>
@@ -36,7 +35,7 @@ function Column<T>({ title, className, items, empty, render, selection }: {
         {selection && (
           <input
             type="checkbox"
-            className="card-select col-select"
+            className="col-select"
             title="Select all in this column"
             checked={allSelected}
             onChange={() => selection.toggleAll(selection.ids)}
@@ -44,13 +43,9 @@ function Column<T>({ title, className, items, empty, render, selection }: {
         )}
         {title} <span className="col-count">{items.length}</span>
       </header>
-      {items.length === 0 && <div className="board-empty">{empty}</div>}
-      {visible.map(render)}
-      {hidden > 0 && (
-        <button className="link col-more" onClick={() => setLimit((n) => n + 5)}>
-          +5 more · {hidden} hidden
-        </button>
-      )}
+      <div className="board-scroll">
+        {items.length === 0 ? <div className="board-empty">{empty}</div> : items.map(render)}
+      </div>
     </section>
   )
 }
@@ -77,7 +72,6 @@ export default function Factory({ jobs, videos, games, maxWorkers, quotaUntil, k
     })
   }
 
-  /** Select-all toggle for one column: clears when the column is already fully selected. */
   const toggleColumn = (ids: string[]) => {
     setSelected((prev) => {
       const next = new Set(prev)
@@ -111,12 +105,7 @@ export default function Factory({ jobs, videos, games, maxWorkers, quotaUntil, k
       <div className="factory-header">
         <h1>Factory</h1>
         <div className="workers-badge">
-          Workers
-          <span className="worker-dots">
-            {Array.from({ length: maxWorkers }, (_, i) => (
-              <span key={i} className={`worker-dot ${i < active.length ? 'on' : ''}`} />
-            ))}
-          </span>
+          <span className={`worker-pulse ${active.length > 0 ? 'on' : ''}`} />
           {active.length} / {maxWorkers} active
         </div>
         {(building.length > 0 || !autoQueue) && (
@@ -161,7 +150,7 @@ export default function Factory({ jobs, videos, games, maxWorkers, quotaUntil, k
           title="Candidates"
           items={candidates}
           empty={<div className="board-empty">No candidates. <button className="link" onClick={onGoSources}>Add a YouTube channel</button> and run the scout.</div>}
-          render={(v) => <CandidateCard key={v.id} video={v} onChanged={onChanged} onChangedJobs={onChanged} />}
+          render={(v) => <TaskCard key={v.id} kind="candidate" video={v} onChanged={onChanged} />}
         />
 
         <Column
@@ -170,7 +159,17 @@ export default function Factory({ jobs, videos, games, maxWorkers, quotaUntil, k
           empty="Queue is empty."
           selection={{ ids: queued.map((j) => j.id), selected, toggleAll: toggleColumn }}
           render={(j, i) => (
-            <JobCard key={j.id} job={j} video={j.video_id ? videoById.get(j.video_id) : undefined} workerHint={active.length + i + 1} onOpen={onOpenJob} onChanged={onChanged} selected={selected.has(j.id)} onToggleSelect={toggleSelect} />
+            <TaskCard
+              key={j.id}
+              kind="job"
+              job={j}
+              video={j.video_id ? videoById.get(j.video_id) : undefined}
+              queuedPosition={active.length + i + 1}
+              onOpen={onOpenJob}
+              onChanged={onChanged}
+              selected={selected.has(j.id)}
+              onToggleSelect={toggleSelect}
+            />
           )}
         />
 
@@ -181,7 +180,16 @@ export default function Factory({ jobs, videos, games, maxWorkers, quotaUntil, k
           empty="No active builders."
           selection={{ ids: building.map((j) => j.id), selected, toggleAll: toggleColumn }}
           render={(j) => (
-            <JobCard key={j.id} job={j} video={j.video_id ? videoById.get(j.video_id) : undefined} onOpen={onOpenJob} onChanged={onChanged} selected={selected.has(j.id)} onToggleSelect={toggleSelect} />
+            <TaskCard
+              key={j.id}
+              kind="job"
+              job={j}
+              video={j.video_id ? videoById.get(j.video_id) : undefined}
+              onOpen={onOpenJob}
+              onChanged={onChanged}
+              selected={selected.has(j.id)}
+              onToggleSelect={toggleSelect}
+            />
           )}
         />
 
@@ -191,7 +199,18 @@ export default function Factory({ jobs, videos, games, maxWorkers, quotaUntil, k
           items={review}
           empty="Nothing to review."
           selection={{ ids: review.map((j) => j.id), selected, toggleAll: toggleColumn }}
-          render={(j) => <JobCard key={j.id} job={j} video={j.video_id ? videoById.get(j.video_id) : undefined} onOpen={onOpenJob} onChanged={onChanged} selected={selected.has(j.id)} onToggleSelect={toggleSelect} />}
+          render={(j) => (
+            <TaskCard
+              key={j.id}
+              kind="job"
+              job={j}
+              video={j.video_id ? videoById.get(j.video_id) : undefined}
+              onOpen={onOpenJob}
+              onChanged={onChanged}
+              selected={selected.has(j.id)}
+              onToggleSelect={toggleSelect}
+            />
+          )}
         />
 
         <Column
@@ -199,250 +218,337 @@ export default function Factory({ jobs, videos, games, maxWorkers, quotaUntil, k
           className="col-published"
           items={published}
           empty="No published games yet."
-          render={(g) => <PublishedCard key={`${g.job_id}-${g.language}`} game={g} />}
+          render={(g) => <TaskCard key={`${g.job_id}-${g.language}`} kind="published" game={g} />}
         />
       </div>
     </div>
   )
 }
 
-function Thumb({ video, fallback }: { video?: Video; fallback: string }) {
+// ---------- card primitives ----------
+
+function CardThumb({ src, seed, label }: { src?: string | null; seed: string; label: string }) {
   const [err, setErr] = useState(false)
-  if (video?.thumbnail_url && !err) {
-    return <img src={video.thumbnail_url} alt="" className="card-thumb" onError={() => setErr(true)} />
+  if (src && !err) {
+    return <img src={src} alt="" className="task-thumb-img" onError={() => setErr(true)} />
   }
-  return <div className="card-thumb card-thumb-fallback">{fallback.slice(0, 1).toUpperCase()}</div>
+  const palette = channelPalette(seed || label)
+  return (
+    <div
+      className="task-thumb-fallback"
+      style={{ background: `linear-gradient(135deg, ${palette.from}, ${palette.to})` }}
+    >
+      <span>{label.slice(0, 1).toUpperCase()}</span>
+    </div>
+  )
 }
 
-function FitBadge({ score }: { score: number | null }) {
-  if (score == null) return null
-  const cls = score >= 75 ? 'fit-high' : score >= 50 ? 'fit-mid' : 'fit-low'
-  return <span className={`fit ${cls}`}>{score} fit</span>
+function StatusChip({ status, extras }: { status: string; extras?: ReactNode }) {
+  // Single source of truth for the colored status pill.
+  const map: Record<string, { label: string; cls: string }> = {
+    queued: { label: 'Waiting', cls: 'chip-muted' },
+    candidate: { label: 'Candidate', cls: 'chip-muted' },
+    running: { label: 'Running', cls: 'chip-accent' },
+    paused: { label: '⏸ Paused', cls: 'chip-paused' },
+    awaiting_review: { label: 'Ready for review', cls: 'chip-ok' },
+    needs_input: { label: '⚠ Needs your input', cls: 'chip-warn' },
+    failed: { label: 'Failed', cls: 'chip-fail' },
+    interrupted: { label: 'Interrupted', cls: 'chip-muted' },
+    submitted: { label: '✓ Published', cls: 'chip-ok' }
+  }
+  const chip = map[status] ?? { label: status, cls: 'chip-muted' }
+  return (
+    <span className={`chip ${chip.cls}`}>
+      {chip.label}
+      {extras && <span className="chip-extras">{extras}</span>}
+    </span>
+  )
 }
 
-function stageProgress(job: Job): number {
-  if (job.status === 'submitted') return STAGE_LIST.length
+function StageProgress({ job }: { job: Job }) {
+  if (job.status !== 'running' && job.status !== 'paused') return null
   const i = job.stage ? STAGE_LIST.findIndex((s) => s.id === job.stage) : -1
-  return i < 0 ? 0 : i + (job.status === 'running' || job.status === 'paused' ? 0 : 1)
+  const total = STAGE_LIST.length
+  const done = i < 0 ? 0 : i + (job.status === 'paused' ? 1 : 0)
+  const current = job.status === 'running' && i >= 0 ? i : -1
+  const stageLabel = i >= 0 ? STAGE_LIST[i].label : phaseLabel(job.phase)
+  return (
+    <div className={`task-progress ${job.status === 'paused' ? 'is-paused' : ''}`}>
+      <div className="task-progress-segments">
+        {Array.from({ length: total }, (_, k) => (
+          <span
+            key={k}
+            className={`task-seg ${k < done ? 'done' : ''} ${k === current ? 'current' : ''}`}
+          />
+        ))}
+      </div>
+      <div className="task-progress-label">
+        <span>{stageLabel}</span>
+        <span className="muted">{Math.min(done + 1, total)} / {total}</span>
+      </div>
+    </div>
+  )
 }
 
-function JobCard({ job, video, workerHint, onOpen, onChanged, selected, onToggleSelect }: {
-  job: Job
+/** Triggers a re-render once a second so the elapsed clock ticks.
+ *  Only mounted for running jobs. The clock itself reads Date.now() on each
+ *  render via formatElapsed; this hook just nudges the render. */
+function useSecondTick(active: boolean) {
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    if (!active) return
+    const id = setInterval(() => setTick((n) => n + 1), 1000)
+    return () => clearInterval(id)
+  }, [active])
+}
+
+function CardMeta({ job }: { job: Job }) {
+  useSecondTick(job.status === 'running' && !!job.started_at)
+  const started = job.started_at || job.created_at
+  const rel = formatRelative(started)
+  const elapsed = job.status === 'running' && job.started_at ? formatElapsed(job.started_at) : ''
+  return (
+    <div className="task-meta">
+      {rel && (
+        <span className="task-meta-time" title={started ? new Date(started).toLocaleString() : ''}>
+          {job.status === 'running' ? 'Started' : 'Queued'} {rel}
+        </span>
+      )}
+      {elapsed && <span className="task-meta-elapsed">{elapsed}</span>}
+      {job.model && <span className="task-meta-model" title="Agent model">⚙ {job.model}</span>}
+    </div>
+  )
+}
+
+// ---------- the unified card ----------
+
+/** Single skeleton used by every card on the board. The `kind` prop picks what
+ *  fills the body / footer. Jobs and candidates are clickable; published cards
+ *  are inert (the action button opens the game in card0). */
+function TaskCard({ kind, job, video, game, queuedPosition, onOpen, onChanged, selected, onToggleSelect }: {
+  kind: 'job' | 'candidate' | 'published'
+  job?: Job
   video?: Video
-  workerHint?: number
-  onOpen: (id: string) => void
-  onChanged: () => void
-  selected: boolean
-  onToggleSelect: (id: string) => void
+  game?: Game
+  queuedPosition?: number
+  onOpen?: (id: string) => void
+  onChanged?: () => void
+  selected?: boolean
+  onToggleSelect?: (id: string) => void
 }) {
-  const progress = stageProgress(job)
-  const [pausing, setPausing] = useState(false)
-  const imperfections = (() => {
-    try {
-      const r = JSON.parse(job.result_json ?? 'null')
-      return Array.isArray(r?.imperfections) ? r.imperfections.length : 0
-    } catch {
-      return 0
+  // ---- shared display data ----
+  const title = kind === 'job'
+    ? (job!.title || 'Untitled')
+    : kind === 'candidate'
+      ? video!.title
+      : (game?.name ?? game?.card0_game_id ?? 'Untitled')
+  const sub = kind === 'job'
+    ? (video?.channel ?? `job ${job!.id.slice(0, 10)}`)
+    : kind === 'candidate'
+      ? video!.channel
+      : (game?.submitted_at ? formatRelative(game.submitted_at) : 'card0')
+  const thumbSrc = kind === 'job'
+    ? video?.thumbnail_url ?? null
+    : kind === 'candidate'
+      ? video!.thumbnail_url ?? null
+      : null // published uses cover via a dedicated effect below
+  const thumbSeed = (kind === 'job' ? video?.channel : kind === 'candidate' ? video!.channel : game?.name) || title
+  const cardClass = `task-card kind-${kind} ${kind === 'job' ? `status-${job!.status}` : ''} ${selected ? 'is-selected' : ''}`
+
+  // ---- click + actions ----
+  const stop = (fn: () => void) => (e: React.MouseEvent) => {
+    e.stopPropagation()
+    fn()
+  }
+  const onCardClick = () => {
+    if (kind === 'job' && onOpen) onOpen(job!.id)
+  }
+  const onCardKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      onCardClick()
+    }
+  }
+  const pauseBuild = async () => {
+    if (!job) return
+    // Hold the queue so nothing else fills the slot the moment this one frees.
+    await window.api.setSettings({ autoQueue: 'false' })
+    await window.api.pauseJob(job.id)
+  }
+  const del = async () => {
+    if (!job) return
+    if (!window.confirm(`Delete "${job.title}"? Its workspace and artifacts are removed - unrecoverable.`)) return
+    await window.api.deleteJob(job.id)
+    onChanged?.()
+  }
+  const queueCandidate = async () => {
+    if (!video) return
+    await window.api.queueVideos([{ id: video.id, title: video.title, url: video.url }])
+    await window.api.setVideoStatus(video.id, 'queued', null)
+    onChanged?.()
+  }
+
+  // ---- primary footer action ----
+  type Action = { label: string; onClick: (e: React.MouseEvent) => void; variant?: 'primary' | 'danger' | 'ghost' }
+  const primary: Action | null = (() => {
+    if (kind === 'candidate') {
+      return { label: 'Build game', onClick: stop(queueCandidate), variant: 'primary' }
+    }
+    if (kind === 'published') {
+      return game?.card0_game_id
+        ? { label: 'Open ↗', onClick: stop(() => window.api.openGame(game.card0_game_id!)), variant: 'ghost' }
+        : null
+    }
+    const j = job!
+    switch (j.status) {
+      case 'running': return { label: 'Pause', onClick: stop(pauseBuild), variant: 'ghost' }
+      case 'paused': return { label: 'Resume', onClick: stop(() => window.api.resumeJob(j.id)), variant: 'primary' }
+      case 'interrupted': return { label: 'Restart', onClick: stop(() => window.api.restartJob(j.id)), variant: 'primary' }
+      case 'awaiting_review': return onOpen ? { label: 'Review →', onClick: stop(() => onOpen(j.id)), variant: 'primary' } : null
+      case 'needs_input':
+      case 'failed':
+        return onOpen ? { label: 'Open', onClick: stop(() => onOpen(j.id)), variant: 'primary' } : null
+      case 'submitted':
+        return onOpen ? { label: 'Open', onClick: stop(() => onOpen(j.id)), variant: 'ghost' } : null
+      default: return null // queued has no button
     }
   })()
 
-  /** Pause this build and hold the queue so nothing else fires up in its place.
-   *  pauseJob (not stopJob): the card stays in Building with a Paused chip. */
-  const pauseBuild = async (e: React.MouseEvent) => {
-    e.stopPropagation()
-    setPausing(true)
+  // ---- chip extras ----
+  const imperfections = (() => {
+    if (kind !== 'job') return 0
     try {
-      await window.api.setSettings({ autoQueue: 'false' })
-      await window.api.pauseJob(job.id)
-    } finally {
-      setPausing(false)
+      const r = JSON.parse(job!.result_json ?? 'null')
+      return Array.isArray(r?.imperfections) ? r.imperfections.length : 0
+    } catch { return 0 }
+  })()
+  const chipExtras: ReactNode = (() => {
+    if (kind === 'job') {
+      if (job!.status === 'awaiting_review' && imperfections > 0) {
+        return <span className="chip-extras">· {imperfections} notes</span>
+      }
+      if (job!.status === 'queued' && queuedPosition) {
+        return <span className="chip-extras">· #{queuedPosition}</span>
+      }
     }
-  }
+    if (kind === 'candidate') {
+      const reasons = (() => { try { return JSON.parse(video!.fit_reasons ?? 'null') } catch { return null } })()
+      if (Array.isArray(reasons) && reasons.length > 0) {
+        return <span className="chip-extras">{reasons[0]}</span>
+      }
+    }
+    if (kind === 'published') {
+      return game?.card_count ? <span className="chip-extras">· {game.card_count} cards</span> : null
+    }
+    return null
+  })()
 
-  /** Hard-delete: job rows + workspace, unrecoverable. */
-  const del = async (e: React.MouseEvent) => {
-    e.stopPropagation()
-    if (!window.confirm(`Delete "${job.title}"? Its workspace and artifacts are removed - unrecoverable.`)) return
-    await window.api.deleteJob(job.id)
-    onChanged()
-  }
+  // ---- one-line teaser for the body ----
+  const teaser: string | null = (() => {
+    if (kind !== 'job' || !job) return null
+    if (job.status === 'needs_input') {
+      try {
+        const parsed = JSON.parse(job.needs_input ?? 'null') as { question?: string } | null
+        if (parsed?.question) return parsed.question
+      } catch { /* fall through */ }
+    }
+    if (job.status === 'failed' && job.error) {
+      return job.error.split('\n')[0].slice(0, 120)
+    }
+    if (job.status === 'interrupted' && job.error) {
+      return job.error.split('\n')[0].slice(0, 120)
+    }
+    return null
+  })()
+
+  // ---- publish cover (published cards load cover from the workspace) ----
+  const [coverData, setCoverData] = useState<string | null>(null)
+  useEffect(() => {
+    if (kind !== 'published' || !game?.cover_path) return
+    let alive = true
+    window.api.readArtifact(game.job_id, game.cover_path).then((d) => {
+      if (alive) setCoverData(d)
+    })
+    return () => { alive = false }
+  }, [kind, game?.job_id, game?.cover_path])
+
+  const lang = kind === 'job' ? job!.language : kind === 'published' ? game?.language : null
+  const clickable = kind === 'job'
 
   return (
     <article
-      className={`issue-card status-${job.status}`}
-      onClick={() => onOpen(job.id)}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => e.key === 'Enter' && onOpen(job.id)}
+      className={cardClass}
+      onClick={clickable ? onCardClick : undefined}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onKeyDown={clickable ? onCardKey : undefined}
     >
-      <div className="issue-top">
-        <input
-          type="checkbox"
-          className="card-select"
-          title="Select for bulk actions"
-          checked={selected}
-          onClick={(e) => e.stopPropagation()}
-          onChange={() => onToggleSelect(job.id)}
+      <div className="task-thumb">
+        {kind === 'published' && coverData
+          ? <img src={coverData} alt="" className="task-thumb-img" />
+          : <CardThumb src={thumbSrc} seed={thumbSeed} label={title} />}
+        {kind === 'job' && onToggleSelect && (
+          <button
+            className="circle-select"
+            title="Select for bulk actions"
+            onClick={stop(() => onToggleSelect(job!.id))}
+            aria-label="Select"
+          >{selected ? '✓' : ''}</button>
+        )}
+        {lang && lang !== 'en' && <span className="task-lang-pill">{lang}</span>}
+        {kind === 'job' && (
+          <button
+            className="task-delete"
+            title="Delete this job (removes its workspace - unrecoverable)"
+            onClick={stop(del)}
+            aria-label="Delete"
+          >✕</button>
+        )}
+        {kind === 'candidate' && video!.fit_score != null && (
+          <span className={`task-fit-pill fit-${video!.fit_score >= 75 ? 'high' : video!.fit_score >= 50 ? 'mid' : 'low'}`}>
+            {video!.fit_score}
+          </span>
+        )}
+      </div>
+
+      <div className="task-body">
+        <div className="task-title">{title}</div>
+        <div className="task-sub">{sub}</div>
+        <div className="task-divider" />
+        {kind === 'job' && <CardMeta job={job!} />}
+        {kind === 'candidate' && (
+          <div className="task-meta">
+            {video!.classification && (
+              <span className="cls-chip">{video!.classification.replaceAll('_', ' ').toLowerCase()}</span>
+            )}
+            {video!.rights_status && video!.rights_status !== 'original' && (
+              <span className="chip chip-warn" title="Copyrighted source - human gates publishing">
+                {video!.rights_status === 'commercial_clone' ? 'commercial ⚠' : video!.rights_status}
+              </span>
+            )}
+            {video!.duration_s != null && (
+              <span className="task-meta-time muted">
+                {Math.round(video!.duration_s / 60)} min
+              </span>
+            )}
+          </div>
+        )}
+        {kind === 'job' && <StageProgress job={job!} />}
+        {teaser && <div className="task-teaser">{teaser}</div>}
+      </div>
+
+      <div className="task-footer">
+        <StatusChip
+          status={kind === 'job' ? job!.status : kind === 'candidate' ? 'candidate' : 'submitted'}
+          extras={chipExtras}
         />
-        <Thumb video={video} fallback={job.title} />
-        <div className="issue-meta">
-          <div className="issue-title">{job.title}</div>
-          <div className="issue-sub">
-            {video ? <span className="muted">{video.channel}</span> : <span className="muted">{job.id.slice(0, 12)}</span>}
-            {job.language !== 'en' && <span className="lang-chip">{job.language}</span>}
-          </div>
-        </div>
-        {(job.status === 'running' || job.status === 'paused') && (
+        {primary && (
           <button
-            className={`icon-btn pause-btn ${job.status === 'paused' ? 'resumable' : ''}`}
-            title={job.status === 'running' ? 'Pause this build (agent stops, progress stays on the board)' : 'Resume this build'}
-            disabled={pausing}
-            onClick={job.status === 'running' ? pauseBuild : (e) => { e.stopPropagation(); window.api.resumeJob(job.id) }}
-          >
-            {pausing ? '…' : job.status === 'running' ? '⏸' : '▶'}
-          </button>
-        )}
-        <button
-          className="icon-btn del-btn"
-          title="Delete this job (removes its workspace - unrecoverable)"
-          onClick={del}
-        >
-          ✕
-        </button>
-      </div>
-
-      {(job.status === 'running' || job.status === 'paused') && (
-        <div className={`issue-progress ${job.status === 'paused' ? 'is-paused' : ''}`}>
-          <div className="progress-label">
-            {workerHint && job.status === 'running' ? <span className="worker-tag">Builder #{workerHint}</span> : null}
-            <span>{phaseLabel(job.phase)}</span>
-            {job.status === 'paused' && <span className="chip chip-paused">⏸ Paused</span>}
-          </div>
-          <div className="progress-bar">
-            <div className="progress-fill" style={{ width: `${(progress / STAGE_LIST.length) * 100}%` }} />
-          </div>
-          {job.stage_detail && <div className="muted small ellipsis">{job.stage_detail}</div>}
-        </div>
-      )}
-
-      {job.status === 'queued' && <div className="issue-line muted small">{phaseLabel(job.phase)} · waiting for a worker</div>}
-      {job.status === 'awaiting_review' && (
-        <div className="issue-line">
-          <span className="chip chip-review">Ready for review</span>
-          {imperfections > 0 && <span className="chip chip-warn">{imperfections} notes</span>}
-        </div>
-      )}
-      {job.status === 'needs_input' && (
-        <div className="issue-line">
-          <span className="chip chip-warn">⚠ Needs your input</span>
-        </div>
-      )}
-      {job.status === 'failed' && <div className="issue-line"><span className="chip chip-fail">Failed</span></div>}
-      {job.status === 'interrupted' && (
-        <div className="issue-line">
-          <span className="chip">Interrupted</span>
-          <button
-            className="small-btn"
-            title="Run this build again (reuses the artifacts already in its workspace)"
-            onClick={(e) => {
-              e.stopPropagation()
-              window.api.restartJob(job.id)
-            }}
-          >
-            Restart
-          </button>
-        </div>
-      )}
-      {job.status === 'submitted' && <div className="issue-line"><span className="chip chip-ok">✓ Published</span></div>}
-    </article>
-  )
-}
-
-function CandidateCard({ video, onChanged, onChangedJobs }: { video: Video; onChanged: () => void; onChangedJobs: () => void }) {
-  const [busy, setBusy] = useState(false)
-  const reasons = (() => {
-    try {
-      const r = JSON.parse(video.fit_reasons ?? 'null')
-      return Array.isArray(r) ? (r as string[]) : []
-    } catch {
-      return []
-    }
-  })()
-
-  const queue = async () => {
-    setBusy(true)
-    try {
-      await window.api.queueVideos([{ id: video.id, title: video.title, url: video.url }])
-      await window.api.setVideoStatus(video.id, 'queued', null)
-      onChanged()
-      onChangedJobs()
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <article className="issue-card candidate">
-      <div className="issue-top">
-        <Thumb video={video} fallback={video.title} />
-        <div className="issue-meta">
-          <div className="issue-title">{video.title}</div>
-          <div className="issue-sub muted">{video.channel}</div>
-        </div>
-      </div>
-      <div className="issue-line">
-        <FitBadge score={video.fit_score} />
-        {video.classification && <span className="cls-chip">{video.classification.replaceAll('_', ' ').toLowerCase()}</span>}
-        {video.rights_status && video.rights_status !== 'original' && (
-          <span className="chip chip-warn" title="Copyrighted source - human gates publishing">{video.rights_status === 'commercial_clone' ? 'commercial ⚠' : video.rights_status}</span>
+            className={`task-action small-btn ${primary.variant ?? ''}`}
+            onClick={primary.onClick}
+          >{primary.label}</button>
         )}
       </div>
-      {reasons.length > 0 && <div className="fit-reasons muted small">{reasons.slice(0, 2).join(' · ')}</div>}
-      <button className="primary small-btn" disabled={busy} onClick={queue}>
-        {busy ? 'Queueing…' : 'Build game'}
-      </button>
-    </article>
-  )
-}
-
-function PublishedCard({ game }: { game: Game }) {
-  const [cover, setCover] = useState<string | null>(null)
-  useEffect(() => {
-    let alive = true
-    if (game.cover_path) {
-      window.api.readArtifact(game.job_id, game.cover_path).then((d) => {
-        if (alive) setCover(d)
-      })
-    }
-    return () => {
-      alive = false
-    }
-  }, [game.job_id, game.cover_path])
-
-  return (
-    <article className="issue-card published">
-      {cover ? (
-        <img src={cover} alt="" className="card-thumb" />
-      ) : (
-        <div className="card-thumb card-thumb-fallback">{(game.name ?? '?').slice(0, 1).toUpperCase()}</div>
-      )}
-      <div className="issue-title">{game.name ?? game.card0_game_id ?? 'Untitled'}</div>
-      <div className="issue-line">
-        <span className="chip chip-ok">✓ on card0</span>
-        {game.language !== 'en' && <span className="lang-chip">{game.language}</span>}
-        {game.card_count ? <span className="muted small">{game.card_count} cards</span> : null}
-      </div>
-      {game.card0_game_id && (
-        <button
-          className="small-btn"
-          onClick={(e) => {
-            e.stopPropagation()
-            window.api.openGame(game.card0_game_id!)
-          }}
-        >
-          Open in card0 ↗
-        </button>
-      )}
     </article>
   )
 }
