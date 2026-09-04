@@ -603,10 +603,10 @@ input[type='checkbox'] { transform: scale(1.2); }
 }
 .st-linklike:hover { text-decoration: underline; background: var(--bg-hover); }
 
-.st-otp { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 340px; }
-.st-otp-row { display: flex; gap: 8px; }
-.st-otp-row input { flex: 1 1 auto; min-width: 0; }
-.st-otp-code { letter-spacing: 0.2em; text-align: center; }
+.st-login { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 340px; }
+.st-login input { width: 100%; min-width: 0; }
+.st-login-row { display: flex; gap: 8px; }
+.st-login-row input { flex: 1 1 auto; }
 
 .st-account-msg {
   margin-top: 12px;

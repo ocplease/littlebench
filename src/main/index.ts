@@ -9,7 +9,7 @@ import { ingestChannel, scoutVideos, deepScoutVideo } from './ingest'
 import { updateVideoStatus, updateVideoScout, deleteVideo } from './db'
 import { setForemanBroadcast, sendForeman, foremanBusy, resetForeman } from './foreman'
 import { keyPoolStatus } from './keys'
-import { card0AccountInfo, card0LoginWeb, card0LoginOtpSend, card0LoginOtpVerify, card0Logout, setCard0Broadcast } from './card0-auth'
+import { card0AccountInfo, card0LoginWeb, card0LoginEmail, card0Logout, setCard0Broadcast } from './card0-auth'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -237,8 +237,7 @@ function registerIpc(): void {
 
   handle('card0:accountInfo', () => card0AccountInfo())
   handle('card0:loginWeb', (opts?: { provider?: 'google' }) => card0LoginWeb(opts ?? {}))
-  handle('card0:loginOtpSend', (email: string) => card0LoginOtpSend(email))
-  handle('card0:loginOtpVerify', (email: string, code: string) => card0LoginOtpVerify(email, code))
+  handle('card0:loginEmail', (email: string, password: string) => card0LoginEmail(email, password))
   handle('card0:logout', () => card0Logout())
 }
 

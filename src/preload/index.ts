@@ -52,8 +52,7 @@ const api: WorkbenchApi = {
   // card0 account / auth
   card0AccountInfo: () => ipcRenderer.invoke('card0:accountInfo'),
   card0LoginWeb: (opts) => ipcRenderer.invoke('card0:loginWeb', opts),
-  card0LoginOtpSend: (email) => ipcRenderer.invoke('card0:loginOtpSend', email),
-  card0LoginOtpVerify: (email, code) => ipcRenderer.invoke('card0:loginOtpVerify', email, code),
+  card0LoginEmail: (email, password) => ipcRenderer.invoke('card0:loginEmail', email, password),
   card0Logout: () => ipcRenderer.invoke('card0:logout'),
 
   // live updates from main

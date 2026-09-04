@@ -130,10 +130,9 @@ export default function SettingsView() {
   const [snapshot, setSnapshot] = useState('')
   const [saved, setSaved] = useState(false)
   const [card0, setCard0] = useState<Card0State>({ loading: true })
-  const [otpOpen, setOtpOpen] = useState(false)
-  const [otpEmail, setOtpEmail] = useState('')
-  const [otpCode, setOtpCode] = useState('')
-  const [otpStage, setOtpStage] = useState<'idle' | 'sent' | 'verifying'>('idle')
+  const [pwEmail, setPwEmail] = useState('')
+  const [pwPassword, setPwPassword] = useState('')
+  const [pwBusy, setPwBusy] = useState(false)
   const [card0Msg, setCard0Msg] = useState<string | null>(null)
   const pollRef = useRef<number | null>(null)
 
@@ -227,46 +226,25 @@ export default function SettingsView() {
     }
   }
 
-  const handleOtpSend = async () => {
+  const handleEmailLogin = async () => {
     setCard0Msg(null)
-    if (!otpEmail.includes('@')) {
-      setCard0Msg('Enter a valid email first.')
+    if (!pwEmail.includes('@') || !pwPassword) {
+      setCard0Msg('Enter your email and password.')
       return
     }
+    setPwBusy(true)
     try {
-      const r: Card0AuthResult = await window.api.card0LoginOtpSend(otpEmail)
+      const r: Card0AuthResult = await window.api.card0LoginEmail(pwEmail, pwPassword)
       if (!r.ok) {
         setCard0Msg(r.error)
         return
       }
-      setOtpStage('sent')
-      setCard0Msg(`Code sent to ${otpEmail}.`)
-    } catch (e) {
-      setCard0Msg(`failed to send code: ${String(e)}`)
-    }
-  }
-
-  const handleOtpVerify = async () => {
-    setCard0Msg(null)
-    if (!otpCode) {
-      setCard0Msg('Enter the code from your email.')
-      return
-    }
-    setOtpStage('verifying')
-    try {
-      const r: Card0AuthResult = await window.api.card0LoginOtpVerify(otpEmail, otpCode)
-      if (!r.ok) {
-        setOtpStage('sent')
-        setCard0Msg(r.error)
-        return
-      }
-      setOtpStage('idle')
-      setOtpCode('')
-      setOtpOpen(false)
+      setPwPassword('')
       await refreshCard0()
     } catch (e) {
-      setOtpStage('sent')
-      setCard0Msg(`verification failed: ${String(e)}`)
+      setCard0Msg(`login failed: ${String(e)}`)
+    } finally {
+      setPwBusy(false)
     }
   }
 
@@ -328,46 +306,35 @@ export default function SettingsView() {
 
         <div className="st-or" role="separator"><span>or</span></div>
 
-        {!otpOpen ? (
-          <button className="st-linklike" onClick={() => { setOtpOpen(true); setCard0Msg(null) }}>
-            Sign in with an email code
-          </button>
-        ) : (
-          <div className="st-otp">
-            <div className="st-otp-row">
-              <input
-                type="email"
-                placeholder="you@example.com"
-                value={otpEmail}
-                onChange={(e) => setOtpEmail(e.target.value)}
-                disabled={otpStage === 'verifying'}
-              />
-              <button onClick={handleOtpSend} disabled={otpStage === 'verifying' || !otpEmail.includes('@')}>
-                {otpStage === 'sent' ? 'Resend' : 'Send code'}
-              </button>
-            </div>
-            {otpStage !== 'idle' && (
-              <div className="st-otp-row">
-                <input
-                  placeholder="6-digit code"
-                  value={otpCode}
-                  onChange={(e) => setOtpCode(e.target.value)}
-                  disabled={otpStage === 'verifying'}
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  className="st-otp-code"
-                />
-                <button
-                  className="st-btn-accent"
-                  onClick={handleOtpVerify}
-                  disabled={otpStage === 'verifying' || !otpCode}
-                >
-                  {otpStage === 'verifying' ? 'Verifying…' : 'Verify'}
-                </button>
-              </div>
-            )}
+        <form
+          className="st-login"
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (!pwBusy) handleEmailLogin()
+          }}
+        >
+          <input
+            type="email"
+            placeholder="Email"
+            value={pwEmail}
+            onChange={(e) => setPwEmail(e.target.value)}
+            disabled={pwBusy}
+            autoComplete="email"
+          />
+          <div className="st-login-row">
+            <input
+              type="password"
+              placeholder="Password"
+              value={pwPassword}
+              onChange={(e) => setPwPassword(e.target.value)}
+              disabled={pwBusy}
+              autoComplete="current-password"
+            />
+            <button className="st-btn-accent" type="submit" disabled={pwBusy || !pwEmail.includes('@') || !pwPassword}>
+              {pwBusy ? 'Signing in…' : 'Sign in'}
+            </button>
           </div>
-        )}
+        </form>
 
         {card0Msg && <div className="st-account-msg">{card0Msg}</div>}
       </div>

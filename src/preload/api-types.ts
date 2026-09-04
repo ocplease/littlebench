@@ -175,8 +175,7 @@ export interface WorkbenchApi {
   // card0 account / auth
   card0AccountInfo(): Promise<Card0AccountInfo>
   card0LoginWeb(opts?: { provider?: 'google' }): Promise<Card0AuthResult>
-  card0LoginOtpSend(email: string): Promise<Card0AuthResult>
-  card0LoginOtpVerify(email: string, code: string): Promise<Card0AuthResult>
+  card0LoginEmail(email: string, password: string): Promise<Card0AuthResult>
   card0Logout(): Promise<Card0AuthResult>
 
   on(channel: string, cb: (payload: unknown) => void): () => void
