@@ -136,53 +136,6 @@ export function card0LoginWeb(opts: { provider?: 'google' } = {}): Promise<Card0
   })
 }
 
-/** Sign in with email + password. The password goes to the CLI over stdin
- *  (`--password-stdin`) so it never shows up in a process list, and is not
- *  persisted anywhere by the workbench. */
-export async function card0LoginEmail(email: string, password: string): Promise<Card0AuthResult> {
-  return new Promise((resolve) => {
-    const child = spawn(
-      CARD0_BIN,
-      ['login', 'email', '--email', email, '--password-stdin'],
-      { env: shellEnv(), stdio: ['pipe', 'pipe', 'pipe'] }
-    )
-    let out = ''
-    let settled = false
-    child.stdout?.on('data', (d: Buffer) => { out += d.toString('utf8') })
-    child.stderr?.on('data', (d: Buffer) => { out += d.toString('utf8') })
-    child.on('error', (err) => {
-      if (settled) return
-      settled = true
-      resolve({ ok: false, error: `failed to start card0 login: ${err.message}` })
-    })
-    child.on('exit', (code) => {
-      if (settled) return
-      settled = true
-      if (code === 0) {
-        broadcast('card0:authChanged', null)
-        resolve({ ok: true })
-        return
-      }
-      // pull the message out of the CLI's JSON error if present
-      const parsed = parseCard0Json(out)
-      const msg =
-        parsed && typeof parsed === 'object' && 'error' in parsed
-          ? ((parsed as { error?: { message?: string } }).error?.message ?? '')
-          : ''
-      resolve({ ok: false, error: msg || out.trim().slice(0, 300) || `login failed (exit ${code})` })
-    })
-    child.stdin?.write(`${password}\n`)
-    child.stdin?.end()
-    const t = setTimeout(() => {
-      if (settled) return
-      settled = true
-      child.kill()
-      resolve({ ok: false, error: 'login timed out' })
-    }, 30_000)
-    t.unref()
-  })
-}
-
 /** Drop the current session. */
 export async function card0Logout(): Promise<Card0AuthResult> {
   try {

@@ -586,13 +586,7 @@ input[type='checkbox'] { transform: scale(1.2); }
 .st-google-btn:hover { background: #f3f4f6; transform: translateY(-1px); }
 .st-google-btn:active { transform: translateY(0); }
 
-.st-or {
-  display: flex; align-items: center; gap: 12px;
-  width: 100%;
-  margin: 14px 0 12px;
-  color: var(--muted); font-size: 11px;
-}
-.st-or::before, .st-or::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+.st-account-hint { margin-top: 12px; font-size: 11px; color: var(--muted); text-align: center; max-width: 320px; }
 
 .st-linklike {
   background: none; border: none; padding: 2px 4px;
@@ -602,11 +596,6 @@ input[type='checkbox'] { transform: scale(1.2); }
   border-radius: 4px;
 }
 .st-linklike:hover { text-decoration: underline; background: var(--bg-hover); }
-
-.st-login { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 340px; }
-.st-login input { width: 100%; min-width: 0; }
-.st-login-row { display: flex; gap: 8px; }
-.st-login-row input { flex: 1 1 auto; }
 
 .st-account-msg {
   margin-top: 12px;

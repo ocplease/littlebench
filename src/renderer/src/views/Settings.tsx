@@ -130,9 +130,6 @@ export default function SettingsView() {
   const [snapshot, setSnapshot] = useState('')
   const [saved, setSaved] = useState(false)
   const [card0, setCard0] = useState<Card0State>({ loading: true })
-  const [pwEmail, setPwEmail] = useState('')
-  const [pwPassword, setPwPassword] = useState('')
-  const [pwBusy, setPwBusy] = useState(false)
   const [card0Msg, setCard0Msg] = useState<string | null>(null)
   const pollRef = useRef<number | null>(null)
 
@@ -226,28 +223,6 @@ export default function SettingsView() {
     }
   }
 
-  const handleEmailLogin = async () => {
-    setCard0Msg(null)
-    if (!pwEmail.includes('@') || !pwPassword) {
-      setCard0Msg('Enter your email and password.')
-      return
-    }
-    setPwBusy(true)
-    try {
-      const r: Card0AuthResult = await window.api.card0LoginEmail(pwEmail, pwPassword)
-      if (!r.ok) {
-        setCard0Msg(r.error)
-        return
-      }
-      setPwPassword('')
-      await refreshCard0()
-    } catch (e) {
-      setCard0Msg(`login failed: ${String(e)}`)
-    } finally {
-      setPwBusy(false)
-    }
-  }
-
   const handleLogout = async () => {
     setCard0Msg(null)
     try {
@@ -304,37 +279,9 @@ export default function SettingsView() {
           <GoogleG /> Continue with Google
         </button>
 
-        <div className="st-or" role="separator"><span>or</span></div>
-
-        <form
-          className="st-login"
-          onSubmit={(e) => {
-            e.preventDefault()
-            if (!pwBusy) handleEmailLogin()
-          }}
-        >
-          <input
-            type="email"
-            placeholder="Email"
-            value={pwEmail}
-            onChange={(e) => setPwEmail(e.target.value)}
-            disabled={pwBusy}
-            autoComplete="email"
-          />
-          <div className="st-login-row">
-            <input
-              type="password"
-              placeholder="Password"
-              value={pwPassword}
-              onChange={(e) => setPwPassword(e.target.value)}
-              disabled={pwBusy}
-              autoComplete="current-password"
-            />
-            <button className="st-btn-accent" type="submit" disabled={pwBusy || !pwEmail.includes('@') || !pwPassword}>
-              {pwBusy ? 'Signing in…' : 'Sign in'}
-            </button>
-          </div>
-        </form>
+        <div className="st-account-hint">
+          Already signed into card0.app in this browser? This completes instantly.
+        </div>
 
         {card0Msg && <div className="st-account-msg">{card0Msg}</div>}
       </div>
