@@ -322,11 +322,11 @@ export default function SettingsView() {
       <Section
         icon={<IconSpark />}
         title="Agents"
-        desc="Models and behavior for the foreman and every builder job."
+        desc="Models and behavior for Steven (the foreman) and every builder job."
       >
         <Row
           title="Agent model"
-          desc={`Used by the foreman and new builder jobs. Default: ${DEFAULT_MODEL}.`}
+          desc={`Used by Steven and new builder jobs. Default: ${DEFAULT_MODEL}.`}
         >
           <Segmented
             options={MODEL_OPTIONS}
@@ -409,7 +409,7 @@ export default function SettingsView() {
           <div className="st-row-label">
             <div className="st-row-title">Claude API keys</div>
             <div className="st-row-desc">
-              One per line — builders and the foreman rotate through them so one 5h quota window doesn't stall the factory. A key that hits 429 cools down until its window resets.
+              One per line — builders and Steven rotate through them so one 5h quota window doesn't stall the factory. A key that hits 429 cools down until its window resets.
             </div>
           </div>
           <textarea

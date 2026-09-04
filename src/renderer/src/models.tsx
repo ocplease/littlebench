@@ -58,7 +58,7 @@ export function ModelPicker({ className, id }: { className?: string; id?: string
       className={className ?? 'model-picker'}
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      title="Agent model (applies to foreman and the next job you queue)"
+      title="Agent model (applies to Steven and the next job you queue)"
     >
       {MODEL_OPTIONS.map((o) => (
         <option key={o.value} value={o.value}>

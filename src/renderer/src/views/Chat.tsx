@@ -79,6 +79,9 @@ window.api.on('foreman:event', (payload) => {
   }
 })
 
+/** The foreman's human-facing name. He runs the factory's jobs — hence Jobs. */
+const FOREMAN_NAME = 'Steven'
+
 /** Talk to the foreman: the Claude agent that runs the factory.
  *  Paste a channel URL, ask for status, tell it what to build. */
 export default function Chat() {
@@ -139,9 +142,9 @@ export default function Chat() {
     <div className="chat">
       <div className="chat-header">
         <div>
-          <h1>Foreman</h1>
+          <h1>Steven Jobs</h1>
           <div className="muted small">
-            Talk to the agent that runs the factory - paste a YouTube channel URL, ask what to build,
+            The factory foreman - paste a YouTube channel URL, ask what to build,
             check on the builders.
           </div>
         </div>
@@ -159,7 +162,7 @@ export default function Chat() {
       <div className="chat-list" ref={listRef}>
         {messages.length === 0 && !store.live && (
           <div className="chat-welcome">
-            <div className="chat-welcome-title">🧢 The foreman is ready.</div>
+            <div className="chat-welcome-title">🧢 {FOREMAN_NAME} is ready.</div>
             <div className="muted">Try:</div>
             <button
               className="chat-suggestion"
@@ -188,7 +191,7 @@ export default function Chat() {
         )}
         {store.live && (
           <div className="chat-msg assistant">
-            <div className="chat-role">foreman</div>
+            <div className="chat-role">{FOREMAN_NAME}</div>
             <div className="chat-bubble">
               {store.live.text}
               <span className="chat-cursor" />
@@ -207,7 +210,7 @@ export default function Chat() {
         )}
         {store.busy && !store.live && store.process.length === 0 && (
           <div className="chat-msg assistant">
-            <div className="chat-role">foreman</div>
+            <div className="chat-role">{FOREMAN_NAME}</div>
             <div className="chat-bubble muted">
               <span className="spinner" /> working…
             </div>
@@ -220,7 +223,7 @@ export default function Chat() {
           className="chat-composer-input"
           value={draft}
           rows={Math.min(5, Math.max(1, draft.split('\n').length))}
-          placeholder={store.busy ? 'The foreman is working…' : 'Message the foreman… (Enter to send, Shift+Enter for newline)'}
+          placeholder={store.busy ? `${FOREMAN_NAME} is working…` : `Message ${FOREMAN_NAME}… (Enter to send, Shift+Enter for newline)`}
           disabled={store.busy}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
@@ -233,7 +236,7 @@ export default function Chat() {
         <div className="chat-composer-foot">
           <div className="chat-composer-foot-left">
             {store.busy && (
-              <span className="chat-working" title="The foreman is running">
+              <span className="chat-working" title={`${FOREMAN_NAME} is running`}>
                 <span className="status-dot" /> Working…
               </span>
             )}
@@ -258,7 +261,7 @@ export default function Chat() {
  *  is a small colored circle with a one-letter initial — tighter than a full
  *  icon, reads at a glance, matches Codex. */
 function MessageBubble({ role, content, ts }: { role: string; content: string; ts?: string }) {
-  const display = role === 'user' ? 'you' : role === 'assistant' ? 'foreman' : 'system'
+  const display = role === 'user' ? 'you' : role === 'assistant' ? FOREMAN_NAME : 'system'
   const initial = display[0]?.toUpperCase() ?? '·'
   return (
     <div className={`chat-msg chat-msg-new ${role}`}>
