@@ -6,13 +6,12 @@ import { useEffect, useState } from 'react'
 import type { Settings } from './types'
 
 export const MODEL_OPTIONS = [
-  { value: 'minimax-m3', label: 'minimax-m3' },
   { value: 'sonnet', label: 'Sonnet' },
   { value: 'opus', label: 'Opus' },
   { value: 'haiku', label: 'Haiku' }
 ] as const
 
-export const DEFAULT_MODEL = 'minimax-m3'
+export const DEFAULT_MODEL = 'sonnet'
 
 /** Display label for any value the picker accepts, including legacy / custom
  *  values that aren't in MODEL_OPTIONS (renders the raw string then). */

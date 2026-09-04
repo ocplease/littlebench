@@ -283,7 +283,7 @@ export function createJob(input: {
   // Capture the active model at queue time so the Factory card can show what ran
   // this build, even after the user changes the setting later. Empty -> null so
   // the renderer renders "—" instead of a stray empty chip.
-  const model = getSetting('model', 'minimax-m3').trim() || null
+  const model = getSetting('model', 'sonnet').trim() || null
   const title = sanitizeTitle(input.title, { youtubeUrl: input.youtube_url ?? null })
   insertJob({
     id,
@@ -370,7 +370,7 @@ export function executeJobWithPrompt(
   mkdirSync(path.join(workspace, '.workbench'), { recursive: true })
   installSkills(workspace) // project-level skills for the headless session
 
-  const model = getSetting('model', 'minimax-m3')
+  const model = getSetting('model', 'sonnet')
   const bypass = getSetting('bypassPermissions', 'true') === 'true'
 
   updateJob(jobId, { status: 'running', started_at: new Date().toISOString(), error: null })

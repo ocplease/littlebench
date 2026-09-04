@@ -50,7 +50,7 @@ function handle(channel: string, fn: (...args: any[]) => any): void {
 
 function registerIpc(): void {
   handle('settings:get', () => ({
-    model: getSetting('model', 'minimax-m3'),
+    model: getSetting('model', 'sonnet'),
     triageModel: getSetting('triageModel', 'haiku'),
     autoQueue: getSetting('autoQueue', 'true'),
     bypassPermissions: getSetting('bypassPermissions', 'true'),

@@ -60,7 +60,7 @@ export function sendForeman(message: string): { ok: boolean; error?: string } {
   if (activeRun) return { ok: false, error: 'foreman is already working on your previous message' }
 
   const sessionId = getSetting('foreman_session_id', '')
-  const model = getSetting('model', '')
+  const model = getSetting('model', 'sonnet')
   insertForemanMessage('user', message)
   broadcast('foreman:event', { type: 'user', text: message })
 
