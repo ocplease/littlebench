@@ -55,6 +55,10 @@ export interface JobRow {
   needs_input: string | null
   /** which Claude model the agent was launched with; null for legacy rows */
   model: string | null
+  /** Where the job entered the factory (UI, foreman, or another agent). */
+  origin: string
+  /** Optional caller-supplied idempotency key for external-agent retries. */
+  external_request_id: string | null
 }
 
 let db: DatabaseSync | null = null
@@ -102,7 +106,9 @@ function migrate(db: DatabaseSync): void {
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       started_at TEXT,
       finished_at TEXT,
-      model TEXT
+      model TEXT,
+      origin TEXT NOT NULL DEFAULT 'workbench',
+      external_request_id TEXT
     );
 
     CREATE TABLE IF NOT EXISTS events (
@@ -171,6 +177,8 @@ function migrate(db: DatabaseSync): void {
     ['jobs', 'phase', 'TEXT'],
     ['jobs', 'needs_input', 'TEXT'],
     ['jobs', 'model', 'TEXT'],
+    ['jobs', 'origin', "TEXT NOT NULL DEFAULT 'workbench'"],
+    ['jobs', 'external_request_id', 'TEXT'],
     ['foreman_messages', 'parts', 'TEXT']
   ]
   for (const [table, col, type] of addColumns) {
@@ -179,6 +187,8 @@ function migrate(db: DatabaseSync): void {
       db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`)
     }
   }
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_external_request
+    ON jobs(external_request_id) WHERE external_request_id IS NOT NULL`)
 }
 
 // ---------- settings ----------
@@ -283,11 +293,15 @@ export function insertJob(job: {
   language?: string
   parent_job_id?: string | null
   model?: string | null
+  origin?: string
+  external_request_id?: string | null
 }): void {
   getDb()
     .prepare(
-      `INSERT INTO jobs (id, video_id, title, youtube_url, language, parent_job_id, model, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'queued')`
+      `INSERT INTO jobs (
+         id, video_id, title, youtube_url, language, parent_job_id, model,
+         origin, external_request_id, status
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued')`
     )
     .run(
       job.id,
@@ -296,7 +310,9 @@ export function insertJob(job: {
       job.youtube_url,
       job.language ?? 'en',
       job.parent_job_id ?? null,
-      job.model ?? null
+      job.model ?? null,
+      job.origin ?? 'workbench',
+      job.external_request_id ?? null
     )
 }
 
@@ -308,6 +324,12 @@ export function listJobs(): JobRow[] {
 
 export function getJob(id: string): JobRow | undefined {
   return getDb().prepare('SELECT * FROM jobs WHERE id = ?').get(id) as unknown as JobRow | undefined
+}
+
+export function getJobByExternalRequestId(requestId: string): JobRow | undefined {
+  return getDb()
+    .prepare('SELECT * FROM jobs WHERE external_request_id = ?')
+    .get(requestId) as unknown as JobRow | undefined
 }
 
 export function updateJob(id: string, fields: Partial<JobRow>): void {

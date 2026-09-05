@@ -12,17 +12,18 @@
  *   lb queue --candidates [--min-fit N] # queue everything above a fit bar
  *   lb queue-url <videoUrl> ["<title>"] # queue a single video URL (title auto-fetched)
  *   lb queue-design "<title>"           # queue a build from a design brief (brief on stdin)
+ *   lb create-job "<title>"             # external-agent API; brief on stdin, JSON result
+ *   lb create-job --json                 # JSON stdin: {title, brief, requestId?}
  *   lb status                           # jobs + games overview
  *   lb run <jobId>                      # run a job in the foreground
  *   lb events <jobId>                   # dump persisted events
  *   lb list
  */
-import { ensureDirs, jobWorkspace } from './paths'
-import { writeFileSync } from 'node:fs'
-import path from 'node:path'
+import { ensureDirs } from './paths'
 import { getDb, getJob, listJobs, listVideos, updateVideoStatus, VideoRow } from './db'
 import {
-  createJob, startJob, executeJobWithPrompt, jobEventsFromDb, recoverInterrupted, jobIsLive
+  createJob, createDesignJob, startJob, executeJobWithPrompt, jobEventsFromDb,
+  recoverInterrupted, jobIsLive
 } from './jobs'
 import { ingestChannel, scoutVideos, fetchVideoTitle, looksLikeVideoUrl } from './ingest'
 
@@ -170,10 +171,58 @@ async function main(): Promise<void> {
       const [title] = rest
       if (!title) throw new Error('usage: queue-design "<title>" (full design brief on stdin)')
       const brief = await readStdin()
-      if (!brief.trim()) throw new Error('pass the full design brief on stdin (pipe or heredoc)')
-      const id = createJob({ title, youtube_url: null, autostart: false })
-      writeFileSync(path.join(jobWorkspace(id), 'design_brief.md'), `${brief.trim()}\n`)
+      const { id } = createDesignJob({ title, brief, origin: 'foreman', autostart: false })
       console.log(`queued ${id}  ${title} (design-brief build)`)
+      return
+    }
+    case 'create-job': {
+      const stdin = await readStdin()
+      let title = rest.join(' ').trim()
+      let brief = stdin
+      let requestId: string | null = null
+
+      if (rest[0] === '--json') {
+        if (!stdin.trim()) throw new Error('JSON request is required on stdin')
+        let request: unknown
+        try {
+          request = JSON.parse(stdin)
+        } catch {
+          throw new Error('stdin must be valid JSON')
+        }
+        if (!request || typeof request !== 'object' || Array.isArray(request)) {
+          throw new Error('JSON request must be an object')
+        }
+        const value = request as Record<string, unknown>
+        title = typeof value.title === 'string' ? value.title : ''
+        brief = typeof value.brief === 'string' ? value.brief : ''
+        if (value.requestId != null && typeof value.requestId !== 'string') {
+          throw new Error('requestId must be a string')
+        }
+        requestId = typeof value.requestId === 'string' ? value.requestId : null
+      }
+
+      if (!title) {
+        throw new Error('usage: create-job "<title>" (brief on stdin) | create-job --json')
+      }
+      const result = createDesignJob({
+        title,
+        brief,
+        origin: 'external_agent',
+        external_request_id: requestId,
+        autostart: false
+      })
+      const job = getJob(result.id)
+      console.log(JSON.stringify({
+        ok: true,
+        created: result.created,
+        job: job && {
+          id: job.id,
+          title: job.title,
+          status: job.status,
+          origin: job.origin,
+          requestId: job.external_request_id
+        }
+      }))
       return
     }
     case 'run': {
@@ -232,7 +281,7 @@ async function main(): Promise<void> {
     }
     default:
       console.log(
-        'commands: ingest | scout | videos | queue | queue-url | status | run | dry-run | events | list'
+        'commands: ingest | scout | videos | queue | queue-url | queue-design | create-job | status | run | dry-run | events | list'
       )
   }
 }
@@ -247,6 +296,11 @@ function printVideo(v: VideoRow): void {
 }
 
 main().catch((e) => {
-  console.error(e instanceof Error ? e.message : String(e))
+  const message = e instanceof Error ? e.message : String(e)
+  if (process.argv[2] === 'create-job') {
+    console.error(JSON.stringify({ ok: false, error: message }))
+  } else {
+    console.error(message)
+  }
   process.exit(1)
 })

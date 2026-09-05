@@ -57,12 +57,14 @@ const FOREMAN_PREAMBLE = [
   '  (the title is fetched automatically) - no ingest or scout needed.',
   '- When the user DESCRIBES a game to build (no video URL) or pastes a design: pass their',
   '  full text on stdin to lb queue-design "<short title>". You do NOT build games yourself -',
-  '  never run card0, yt-dlp, or file tools directly; the factory builders do that work.',
+  '  never run card0 or yt-dlp directly; the factory builders do that work.',
+  '- Factory operations go through the lb CLI, but you have the full Claude Code tool set:',
+  '  use Read on files the user attaches (images included - the backend accepts image input),',
+  '  Grep/Glob to explore, and any other tool when the task calls for it.',
   '- Builders pick up queued jobs automatically while the littlebench app is running; lb queue',
   '  does not need to start anything.',
   '- Publishing stays a human action in the app - never claim to publish games.',
   '- Answers stay short and concrete: what you did, what came out, what you suggest next.',
-  '- Use only the lb CLI unless the user explicitly asks for something else.',
   '- Image-generation gate: if the user has DISABLED auto image generation for card art in',
   '  Settings, builders will pause and ask the user before any card art call. When you',
   '  describe a queued build to the user, mention that image generation requires their approval.'
@@ -151,9 +153,10 @@ export function sendForeman(message: string): { ok: boolean; error?: string } {
     cwd: workbenchRoot(),
     prompt: sessionId ? message : `${FOREMAN_PREAMBLE}\n\n---\n\n${message}`,
     model: model || undefined,
-    // No bypass: the foreman may only run the lb CLI.
-    bypassPermissions: false,
-    allowedTools: ['Bash(lb:*)'],
+    // Full Claude Code tool set, gated by the same bypass toggle as builder
+    // jobs. Steven is a trusted local agent - the lb-only allowlist was a
+    // leftover from when he couldn't be trusted with Read.
+    bypassPermissions: getSetting('bypassPermissions', 'true') === 'true',
     resumeSessionId: sessionId || undefined,
     env: lbEnv(),
     onEvent: (event) => {

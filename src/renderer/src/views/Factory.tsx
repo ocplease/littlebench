@@ -343,7 +343,7 @@ function TaskCard({ kind, job, video, game, queuedPosition, onOpen, onChanged, s
       ? video!.title
       : (game?.name ?? game?.card0_game_id ?? 'Untitled')
   const sub = kind === 'job'
-    ? (video?.channel ?? `job ${job!.id.slice(0, 10)}`)
+    ? (video?.channel ?? (job!.origin === 'external_agent' ? 'Agent request' : 'Design brief'))
     : kind === 'candidate'
       ? video!.channel
       : (game?.submitted_at ? formatRelative(game.submitted_at) : 'card0')

@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, useCallback, type ReactNode } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import type { ForemanMessage, Attachment } from '../types'
 import { ModelPicker } from '../models'
+import { DecisionCard, RichMessage, splitQuestion } from '../components/AgentMessage'
 
 /** One step of the foreman's live process feed: a thinking block, a tool
  *  call, or a chunk of reply text - the Part-stream the plan prescribes, so
@@ -167,9 +168,9 @@ export default function Chat() {
     if (!text || store.busy) return
     atBottomRef.current = true
     updateStore({ busy: true })
-    // The foreman is restricted to `lb` commands and can't Read files
-    // directly; inline small text content and reference paths for the rest
-    // so Steven can act on the attachments inside its existing tool set.
+    // Steven has the full Claude Code tool set (Read included, and the
+    // backend accepts images), so paths alone would work - but inlining
+    // small text content saves him a tool round-trip.
     const augmented = attachments.length === 0 ? text : `${text}\n\n${formatAttachments(attachments)}`
     const res = await window.api.foremanSend(augmented)
     setAttachments([])
@@ -199,14 +200,22 @@ export default function Chat() {
     if (picked.length > 0) setAttachments((cur) => [...cur, ...picked])
   }
 
+  const latestMessage = messages.at(-1)
+  const openQuestionId = latestMessage?.role === 'assistant' && splitQuestion(latestMessage.content).prompt
+    ? latestMessage.id
+    : null
+
   return (
     <div className="chat">
       <div className="chat-header">
         <div>
-          <h1>Steven Jobs</h1>
+          <div className="chat-title-row">
+            <span className={`presence-dot${store.busy ? ' is-busy' : ''}`} />
+            <h1>Steven Jobs</h1>
+            <span className="chat-agent-role">Factory head</span>
+          </div>
           <div className="muted small">
-            The factory foreman - paste a YouTube channel URL, ask what to build,
-            check on the builders.
+            Turn an idea or video into a queued game, then follow every builder from here.
           </div>
         </div>
         {messages.length > 0 && (
@@ -223,8 +232,9 @@ export default function Chat() {
       <div className="chat-list" ref={listRef} onScroll={onScroll}>
         {messages.length === 0 && store.process.length === 0 && (
           <div className="chat-welcome">
-            <div className="chat-welcome-title">🧢 {FOREMAN_NAME} is ready.</div>
-            <div className="muted">Try:</div>
+            <div className="welcome-mark" aria-hidden="true">S</div>
+            <div className="chat-welcome-title">What should the factory make?</div>
+            <div className="muted">Start from a channel, a video, or a game idea.</div>
             <button
               className="chat-suggestion"
               onClick={() => setDraft('Here is a card game channel: https://www.youtube.com/@BeforeYouPlay - find the videos that can become games and queue the best ones.')}
@@ -239,7 +249,12 @@ export default function Chat() {
         )}
         {messages.map((m) => (
           <div key={m.id} className="chat-turn">
-            <MessageBubble role={m.role} content={m.content} ts={m.created_at} />
+            <MessageBubble
+              role={m.role}
+              content={m.content}
+              ts={m.created_at}
+              onDecision={m.id === openQuestionId && !store.busy ? (answer) => void sendText(answer) : undefined}
+            />
             {m.role === 'assistant' && hasToolParts(m.parts) && (
               <details className="cc-done cc-done-hist">
                 <summary>
@@ -385,55 +400,23 @@ function formatAttachments(attachments: Attachment[]): string {
   return lines.join('\n')
 }
 
-/** Minimal markdown for chat bubbles: fenced code blocks, inline code,
- *  bold, and bare links. Enough for the foreman's replies without pulling
- *  a markdown dependency into the bundle. */
-function Md({ text }: { text: string }) {
-  // Odd chunks live between ``` fences and render as code blocks.
-  const chunks = text.split('```')
-  return (
-    <div className="md">
-      {chunks.map((chunk, i) =>
-        i % 2 === 1 ? (
-          <pre key={i} className="md-code">
-            <code>{chunk.replace(/^[a-zA-Z0-9_+-]*\n/, '').replace(/\n$/, '')}</code>
-          </pre>
-        ) : chunk.trim() ? (
-          <p key={i}>{renderInline(chunk)}</p>
-        ) : null
-      )}
-    </div>
-  )
-}
-
-function renderInline(text: string): ReactNode[] {
-  const out: ReactNode[] = []
-  const re = /`([^`]+)`|\*\*([^*]+)\*\*|(https?:\/\/[^\s<>"')]+)/g
-  let last = 0
-  let key = 0
-  let m: RegExpExecArray | null
-  while ((m = re.exec(text)) !== null) {
-    if (m.index > last) out.push(text.slice(last, m.index))
-    if (m[1] !== undefined) out.push(<code key={key++}>{m[1]}</code>)
-    else if (m[2] !== undefined) out.push(<strong key={key++}>{m[2]}</strong>)
-    else if (m[3] !== undefined)
-      out.push(
-        <a key={key++} href={m[3]} target="_blank" rel="noreferrer">
-          {m[3]}
-        </a>
-      )
-    last = re.lastIndex
-  }
-  if (last < text.length) out.push(text.slice(last))
-  return out
-}
-
 /** A single message in the chat log: role avatar, name, bubble. The avatar
  *  is a small colored circle with a one-letter initial — tighter than a full
  *  icon, reads at a glance, matches Codex. */
-function MessageBubble({ role, content, ts }: { role: string; content: string; ts?: string }) {
+function MessageBubble({
+  role,
+  content,
+  ts,
+  onDecision
+}: {
+  role: string
+  content: string
+  ts?: string
+  onDecision?: (answer: string) => void
+}) {
   const display = role === 'user' ? 'you' : role === 'assistant' ? FOREMAN_NAME : 'system'
   const initial = display[0]?.toUpperCase() ?? '·'
+  const { body, prompt } = splitQuestion(content)
   return (
     <div className={`chat-msg chat-msg-new ${role}`}>
       <div className={`chat-avatar chat-avatar-${role}`}>{initial}</div>
@@ -443,8 +426,10 @@ function MessageBubble({ role, content, ts }: { role: string; content: string; t
           {ts && <span className="chat-time muted small">{ts.slice(11, 16)}</span>}
         </div>
         <div className="chat-bubble-new">
-          <Md text={content} />
-        </div>      </div>
+          <RichMessage text={body || content} />
+        </div>
+        {prompt && onDecision && <DecisionCard prompt={prompt} onSubmit={onDecision} compact />}
+      </div>
     </div>
   )
 }
@@ -463,7 +448,7 @@ function ProcessRow({ item, streaming }: { item: ProcessItem; streaming?: boolea
   if (item.kind === 'text') {
     return (
       <div className="cc-text">
-        <Md text={item.text} />
+        <RichMessage text={item.text} />
         {streaming && <span className="chat-cursor" />}
       </div>
     )

@@ -41,6 +41,8 @@ export interface Job {
   needs_input: string | null
   /** which Claude model the agent was launched with; null for legacy rows */
   model: string | null
+  origin: string
+  external_request_id: string | null
 }
 
 export interface Game {

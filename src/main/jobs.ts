@@ -13,7 +13,7 @@ import { isAuthRequiredError } from './card0-auth'
 import type { Attachment } from './attachments'
 import {
   getJob, getSetting, setSetting, insertJob, listJobs, updateJob, appendEvent, upsertGame,
-  listEvents, deleteJobRows, JobRow
+  listEvents, deleteJobRows, getJobByExternalRequestId, JobRow
 } from './db'
 
 type Broadcast = (channel: string, payload: unknown) => void
@@ -318,6 +318,8 @@ export function createJob(input: {
   youtube_url?: string | null
   language?: string
   parent_job_id?: string | null
+  origin?: string
+  external_request_id?: string | null
   /** Start the agent immediately (GUI default). CLI `queue` passes false - a short-lived
    *  process must not spawn an agent whose event handlers die with it. */
   autostart?: boolean
@@ -335,12 +337,70 @@ export function createJob(input: {
     youtube_url: input.youtube_url ?? null,
     language: input.language ?? 'en',
     parent_job_id: input.parent_job_id ?? null,
-    model
+    model,
+    origin: input.origin ?? 'workbench',
+    external_request_id: input.external_request_id ?? null
   })
   mkdirSync(jobWorkspace(id), { recursive: true })
   emit('jobs:changed', null)
   if (input.autostart !== false) pumpQueue()
   return id
+}
+
+/** Queue a game directly from a natural-language design request.
+ *
+ * This is the shared boundary for the in-app foreman and external agents.
+ * The brief is written before auto-starting so a builder can never observe a
+ * queued design job without its source request. A caller-supplied request ID
+ * makes retries safe: the original job is returned instead of duplicated.
+ */
+export function createDesignJob(input: {
+  title: string
+  brief: string
+  origin?: string
+  external_request_id?: string | null
+  autostart?: boolean
+}): { id: string; created: boolean } {
+  const title = input.title.trim()
+  const brief = input.brief.trim()
+  const requestId = input.external_request_id?.trim() || null
+  if (!title) throw new Error('title is required')
+  if (!brief) throw new Error('design brief is required')
+  if (title.length > 240) throw new Error('title must be 240 characters or fewer')
+  if (requestId && requestId.length > 200) throw new Error('requestId must be 200 characters or fewer')
+
+  if (requestId) {
+    const existing = getJobByExternalRequestId(requestId)
+    if (existing) return { id: existing.id, created: false }
+  }
+
+  let id: string
+  try {
+    id = createJob({
+      title,
+      youtube_url: null,
+      origin: input.origin ?? 'external_agent',
+      external_request_id: requestId,
+      autostart: false
+    })
+  } catch (error) {
+    // Two independent agents can submit the same idempotency key at nearly
+    // the same time. The unique index picks one winner; the loser returns it.
+    if (requestId) {
+      const existing = getJobByExternalRequestId(requestId)
+      if (existing) return { id: existing.id, created: false }
+    }
+    throw error
+  }
+  try {
+    writeFileSync(path.join(jobWorkspace(id), 'design_brief.md'), `${brief}\n`, { flag: 'wx' })
+  } catch (error) {
+    deleteJobRows(id)
+    rmSync(jobWorkspace(id), { recursive: true, force: true })
+    throw error
+  }
+  if (input.autostart !== false) pumpQueue()
+  return { id, created: true }
 }
 
 export function startJob(jobId: string): void {
