@@ -199,7 +199,6 @@ export function buildGamePrompt(job: JobRow): string {
 
 export function buildLocalizePrompt(parent: JobRow, language: 'zh-Hans' | 'ja'): string {
   const langName = language === 'zh-Hans' ? 'Simplified Chinese' : 'Japanese'
-  const styleBlock = itoStyleBlock(parent.title, langName)
   return [
     'You are running inside an automated workbench. Create a localized card0 game.',
     `Source English game job workspace: ${jobWorkspace(parent.id)}`,
@@ -213,38 +212,13 @@ export function buildLocalizePrompt(parent: JobRow, language: 'zh-Hans' | 'ja'):
     `after the fact"): translate the manifest`,
     `into ${langName} (language code "${language}"), create a NEW card0 game, regenerate ALL artwork`,
     `with ${langName} text rendered on the images, and upload everything.`,
-    '- Work inside the current directory (this is your workspace).',
+    '- Work inside the current directory (this is your job workspace).',
     '- CRITICAL: Do NOT run `card0 game submit`. A human reviews the cards first.',
     '- Write result.json in this directory with the same shape as the English job.',
-    styleBlock,
     NO_IMAGE_INPUT,
     PROTOCOL_CONTRACT,
     imageGenGate()
   ].filter(Boolean).join('\n')
-}
-
-/** When the parent game is the Japanese ITO number-party game (or a
- *  localized variant), steer card-art generation toward the official ITO
- *  visual style. The reference photo sits in the user's Downloads; the
- *  agent can Read it. Style is described textually as a fallback so the
- *  brief still works if the file is missing. */
-function itoStyleBlock(parentTitle: string, langName: string): string {
-  if (!/\bito\b/i.test(parentTitle)) return ''
-  return [
-    '',
-    'VISUAL STYLE (match the official ITO card-game aesthetic):',
-    'Reference image: /Users/shuulin/Downloads/ito cards.jpeg - Read it with the Read tool BEFORE',
-    'generating any card art. Then produce images in the same style:',
-    '- Number cards: large, bold, slightly chunky hand-drawn number in one bright color per card,',
-    '  thin matching-color border on a white rounded card, with a small unique cute cartoon',
-    '  character illustration filling the lower half of the card.',
-    '- Wildcard / action cards (hearts, etc.): solid colored background (green, blue, pink) with a',
-    '  centered graphic (hearts, icons) and small explanation icons or text below.',
-    '- Topic / theme cards: solid colored background (blue or pink) with white rounded sans-serif',
-    '  text and a small footer icon.',
-    '- Overall: rounded corners, flat friendly mascot-style illustration, clean white card frames,',
-    '  playful-but-clean composition. Render all text on the images in ' + langName + '.'
-  ].join('\n')
 }
 
 // ---------- job lifecycle ----------
