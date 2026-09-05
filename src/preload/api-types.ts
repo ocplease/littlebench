@@ -101,6 +101,18 @@ export interface IngestResult {
   total: number
 }
 
+/** A file the user attached in a chat / job composer. Carries a path so
+ *  agents with filesystem access can read it, and an inline `content` for
+ *  small text files so agents that can't (e.g. the foreman, restricted to
+ *  the lb CLI) can still act on the contents. */
+export interface Attachment {
+  name: string
+  path: string
+  size: number
+  type: string
+  content?: string
+}
+
 export interface ApproveResult {
   ok: boolean
   error?: string
@@ -172,7 +184,8 @@ export interface WorkbenchApi {
   restartJob(id: string): Promise<boolean>
   jobEvents(id: string): Promise<unknown[]>
   localizeJob(jobId: string, language: string): Promise<string | null>
-  steerJob(id: string, message: string, artifactPath?: string): Promise<ApproveResult>
+  steerJob(id: string, message: string, attachments?: Attachment[]): Promise<ApproveResult>
+  pickAttachments(target: 'foreman' | string): Promise<Attachment[]>
   jobIsLive(id: string): Promise<boolean>
   jobMessages(id: string): Promise<Message[]>
 

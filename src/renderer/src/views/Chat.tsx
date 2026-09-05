@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback, type ReactNode } from 'react'
-import type { ForemanMessage } from '../types'
+import type { ForemanMessage, Attachment } from '../types'
 import { ModelPicker } from '../models'
 
 /** One step of the foreman's live process feed: a thinking block, a tool
@@ -120,6 +120,7 @@ const FOREMAN_NAME = 'Steven'
 export default function Chat() {
   const [messages, setMessages] = useState<ForemanMessage[]>([])
   const [draft, setDraft] = useState('')
+  const [attachments, setAttachments] = useState<Attachment[]>([])
   const [, setTick] = useState(0)
   const listRef = useRef<HTMLDivElement>(null)
 
@@ -166,7 +167,12 @@ export default function Chat() {
     if (!text || store.busy) return
     atBottomRef.current = true
     updateStore({ busy: true })
-    const res = await window.api.foremanSend(text)
+    // The foreman is restricted to `lb` commands and can't Read files
+    // directly; inline small text content and reference paths for the rest
+    // so Steven can act on the attachments inside its existing tool set.
+    const augmented = attachments.length === 0 ? text : `${text}\n\n${formatAttachments(attachments)}`
+    const res = await window.api.foremanSend(augmented)
+    setAttachments([])
     if (!res.ok) {
       setMessages((prev) => [
         ...prev,
@@ -185,6 +191,12 @@ export default function Chat() {
     if (!text) return
     setDraft('')
     void sendText(text)
+  }
+
+  const onPick = async () => {
+    if (store.busy) return
+    const picked = await window.api.pickAttachments('foreman')
+    if (picked.length > 0) setAttachments((cur) => [...cur, ...picked])
   }
 
   return (
@@ -282,6 +294,16 @@ export default function Chat() {
       </div>
 
       <div className="chat-composer">
+        {attachments.length > 0 && (
+          <div className="chat-attach-row">
+            {attachments.map((a, i) => (
+              <span key={i} className="chat-attach-chip" title={a.path}>
+                📎 {a.name}
+                <button onClick={() => setAttachments((cur) => cur.filter((_, j) => j !== i))}>×</button>
+              </span>
+            ))}
+          </div>
+        )}
         <textarea
           className="chat-composer-input"
           value={draft}
@@ -314,10 +336,18 @@ export default function Chat() {
             )}
           </div>
           <div className="chat-composer-foot-right">
+            <button
+              className="small-btn chat-attach-btn"
+              title="Attach files (text content inlined, paths given)"
+              onClick={onPick}
+              disabled={store.busy}
+            >
+              📎
+            </button>
             <ModelPicker />
             <button
               className="primary chat-send"
-              disabled={store.busy || !draft.trim()}
+              disabled={store.busy || (!draft.trim() && attachments.length === 0)}
               onClick={send}
             >
               Send
@@ -333,6 +363,26 @@ export default function Chat() {
  *  used tools - pure-text turns render as a plain bubble. */
 function hasToolParts(parts: ForemanMessage['parts']): boolean {
   return Boolean(parts?.items.some((i) => i.kind !== 'text'))
+}
+
+/** Format a list of attachments for inclusion in the foreman's user
+ *  message: paths first (so the model knows what's available), then inline
+ *  content for small text files so the foreman (which can't Read files
+ *  directly) can act on the body without filesystem access. */
+function formatAttachments(attachments: Attachment[]): string {
+  const lines: string[] = ['[Attachments]']
+  for (const a of attachments) {
+    lines.push(`- ${a.name} (${a.type}, ${(a.size / 1024).toFixed(1)} KB) -> ${a.path}`)
+  }
+  for (const a of attachments) {
+    if (a.content === undefined) continue
+    lines.push('')
+    lines.push(`--- ${a.name} ---`)
+    lines.push('```')
+    lines.push(a.content)
+    lines.push('```')
+  }
+  return lines.join('\n')
 }
 
 /** Minimal markdown for chat bubbles: fenced code blocks, inline code,

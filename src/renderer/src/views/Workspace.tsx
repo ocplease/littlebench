@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import type { ReactNode } from 'react'
-import type { Job, StreamEvent, Artifact, ProtocolArtifactRow, Message, Settings } from '../types'
+import type { Job, StreamEvent, Artifact, ProtocolArtifactRow, Message, Settings, Attachment } from '../types'
 import { STAGE_LIST, PHASE_LIST, STATUS_LABEL } from '../types'
 import { ModelPicker } from '../models'
 import { formatRelative, formatElapsed } from '../format'
@@ -30,7 +30,7 @@ export default function Workspace({ job, onBack, onChanged }: Props) {
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
-  const [attached, setAttached] = useState<string | null>(null)
+  const [attached, setAttached] = useState<Attachment[]>([])
   const [artifactTab, setArtifactTab] = useState<ArtifactTab>('images')
   const [settings, setSettings] = useState<Settings | null>(null)
   const [expandedPhase, setExpandedPhase] = useState<string | null>(null)
@@ -123,9 +123,19 @@ export default function Workspace({ job, onBack, onChanged }: Props) {
   const send = () => {
     const message = draft.trim()
     if (!message) return
-    act(() => window.api.steerJob(job.id, message, attached ?? undefined), 'Steer')
+    act(() => window.api.steerJob(job.id, message, attached.length > 0 ? attached : undefined), 'Steer')
     setDraft('')
-    setAttached(null)
+    setAttached([])
+  }
+
+  /** Add a workspace-internal artifact (e.g. an image from the modal) to the
+   *  pending attachments. Size and type are best-effort. */
+  const attachArtifact = (rel: string, file: string) => {
+    const name = file.split('/').pop() ?? rel
+    setAttached((cur) => [
+      ...cur,
+      { name, path: rel, size: 0, type: file.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg' }
+    ])
   }
 
   // latest protocol snapshot wins for task statuses
@@ -324,10 +334,14 @@ export default function Workspace({ job, onBack, onChanged }: Props) {
                 ))}
               </div>
             )}
-            {attached && (
-              <div className="attachment">
-                attached: {attached.split('/').pop()}{' '}
-                <button className="link" onClick={() => setAttached(null)}>remove</button>
+            {attached.length > 0 && (
+              <div className="ws-attach-row">
+                {attached.map((a, i) => (
+                  <span key={i} className="ws-attach-chip" title={a.path}>
+                    📎 {a.name}
+                    <button onClick={() => setAttached((cur) => cur.filter((_, j) => j !== i))}>×</button>
+                  </span>
+                ))}
               </div>
             )}
             <textarea
@@ -361,10 +375,21 @@ export default function Workspace({ job, onBack, onChanged }: Props) {
                 )}
               </div>
               <div className="ws-composer-foot-right">
+                <button
+                  className="small-btn ws-attach-btn"
+                  title="Attach files to this message"
+                  onClick={async () => {
+                    const picked = await window.api.pickAttachments(job.id)
+                    if (picked.length > 0) setAttached((cur) => [...cur, ...picked])
+                  }}
+                  disabled={live || !steerable}
+                >
+                  📎
+                </button>
                 <ModelPicker />
                 <button
                   className="primary ws-send"
-                  disabled={live || !steerable || !draft.trim()}
+                  disabled={live || !steerable || (!draft.trim() && attached.length === 0)}
                   onClick={send}
                 >
                   Send
@@ -440,7 +465,7 @@ export default function Workspace({ job, onBack, onChanged }: Props) {
               <div className="modal-actions">
                 <button
                   onClick={() => {
-                    setAttached(modal.img!.rel)
+                    attachArtifact(modal.img!.rel, modal.img!.file)
                     setDraft('Regenerate this card with a different take: ')
                     setModal(null)
                   }}
@@ -449,7 +474,7 @@ export default function Workspace({ job, onBack, onChanged }: Props) {
                 </button>
                 <button
                   onClick={() => {
-                    setAttached(modal.img!.rel)
+                    attachArtifact(modal.img!.rel, modal.img!.file)
                     setDraft('About this card: ')
                     setModal(null)
                   }}

@@ -1586,6 +1586,24 @@ input[type='checkbox'] { transform: scale(1.2); }
 .chat-stop { color: var(--accent-red, #f85149); }
 .chat-stop:hover { border-color: var(--accent-red, #f85149); color: var(--accent-red, #f85149); }
 
+/* attachment chips + paperclip button (Chat and Workspace) */
+.chat-attach-row, .ws-attach-row {
+  display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 6px;
+}
+.chat-attach-chip, .ws-attach-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11.5px; padding: 3px 4px 3px 9px;
+  background: var(--bg-raised); border: 1px solid var(--border);
+  border-radius: 999px; color: var(--text);
+  max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chat-attach-chip button, .ws-attach-chip button {
+  font-size: 14px; line-height: 1; background: none; border: none;
+  color: var(--muted); cursor: pointer; padding: 0 4px;
+}
+.chat-attach-chip button:hover, .ws-attach-chip button:hover { color: var(--text); }
+.chat-attach-btn, .ws-attach-btn { font-size: 14px; padding: 5px 9px; }
+
 .chat-input {
   display: flex; gap: 10px; align-items: flex-end;
   padding: 14px 24px 18px; border-top: 1px solid var(--border);

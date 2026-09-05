@@ -1,6 +1,6 @@
 export type {
   Video, Job, Game, Artifact, ProtocolArtifactRow, Message, Settings, ForemanMessage,
-  Card0Account, Card0AccountInfo, Card0AuthResult
+  Card0Account, Card0AccountInfo, Card0AuthResult, Attachment
 } from '../../preload/api-types'
 export type { StreamEvent } from './stream-event'
 

@@ -10,6 +10,7 @@ import { parseProtocol, applyProtocol, PROTOCOL_CONTRACT } from './protocol'
 import { agentEnv, coolKey, claudeKeysAvailable, parseQuotaReset } from './keys'
 import { insertMessage } from './db'
 import { isAuthRequiredError } from './card0-auth'
+import type { Attachment } from './attachments'
 import {
   getJob, getSetting, setSetting, insertJob, listJobs, updateJob, appendEvent, upsertGame,
   listEvents, deleteJobRows, JobRow
@@ -750,7 +751,7 @@ export function restartJob(jobId: string): void {
  *  claude session with the message (plus artifact context if attached), run it
  *  through the same event pipeline, and land back in review/needs_input.
  *  Mid-run injection (streaming stdin) is future work. */
-export function steerJob(jobId: string, message: string, artifactPath?: string | null): { ok: boolean; error?: string } {
+export function steerJob(jobId: string, message: string, attachments?: Attachment[]): { ok: boolean; error?: string } {
   const job = getJob(jobId)
   if (!job) return { ok: false, error: 'job not found' }
   if (job.status === 'running' || running.has(jobId) || jobIsLive(job)) {
@@ -761,16 +762,17 @@ export function steerJob(jobId: string, message: string, artifactPath?: string |
   }
   if (!job.session_id) return { ok: false, error: 'no session to resume - use Restart instead' }
 
-  insertMessage(jobId, 'user', message, artifactPath ?? null)
+  // Persist the first attachment as the message's artifact_path for the
+  // history view; the full list lives in the message content.
+  const first = attachments?.[0]
+  insertMessage(jobId, 'user', message, first?.path ?? null)
 
-  const context = artifactPath
-    ? `\n\nThe user is referring to this artifact: ${artifactPath} (in the current workspace).`
-    : ''
+  const ctx = buildAttachmentContext(attachments)
   const prompt = [
     'The human reviewing this game sent you a message. Apply it now:',
     '',
     `"${message}"`,
-    context,
+    ctx,
     '',
     'Continue in this same workspace. Update .workbench/tasks.json as you work.',
     'If you change the card0 game, update result.json afterwards.',
@@ -780,6 +782,21 @@ export function steerJob(jobId: string, message: string, artifactPath?: string |
 
   executeJobWithPrompt(jobId, prompt, { resumeSessionId: job.session_id })
   return { ok: true }
+}
+
+function buildAttachmentContext(attachments: Attachment[] | undefined): string {
+  if (!attachments || attachments.length === 0) return ''
+  const lines: string[] = ['\n\nThe user attached these files (all paths are in the current workspace):']
+  for (const a of attachments) {
+    lines.push(`- ${a.name}  (${a.type}, ${(a.size / 1024).toFixed(1)} KB)  -> ${a.path}`)
+    if (a.content !== undefined) {
+      lines.push('  Content:')
+      lines.push('  ```')
+      lines.push(a.content.replace(/\n/g, '\n  '))
+      lines.push('  ```')
+    }
+  }
+  return lines.join('\n')
 }
 
 /** Auto-advance: keep up to maxWorkers agents running. */

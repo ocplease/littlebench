@@ -29,7 +29,8 @@ const api: WorkbenchApi = {
   restartJob: (id) => ipcRenderer.invoke('jobs:restart', id),
   jobEvents: (id) => ipcRenderer.invoke('jobs:events', id),
   localizeJob: (jobId, language) => ipcRenderer.invoke('jobs:localize', jobId, language),
-  steerJob: (id, message, artifactPath) => ipcRenderer.invoke('jobs:steer', id, message, artifactPath),
+  steerJob: (id, message, attachments) => ipcRenderer.invoke('jobs:steer', id, message, attachments),
+  pickAttachments: (target) => ipcRenderer.invoke('attachments:pick', target),
   jobIsLive: (id) => ipcRenderer.invoke('jobs:isLive', id),
   jobMessages: (id) => ipcRenderer.invoke('jobs:messages', id),
 

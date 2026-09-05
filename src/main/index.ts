@@ -8,6 +8,7 @@ import { setBroadcast, setShuttingDown, createJob, startJob, stopJob, pauseJob, 
 import { ingestChannel, scoutVideos, deepScoutVideo } from './ingest'
 import { updateVideoStatus, updateVideoScout, deleteVideo } from './db'
 import { setForemanBroadcast, sendForeman, foremanBusy, resetForeman, stopForeman } from './foreman'
+import { pickAndAttach, attachPaths, type Attachment } from './attachments'
 import { keyPoolStatus } from './keys'
 import { card0AccountInfo, card0LoginWeb, card0Logout, setCard0Broadcast } from './card0-auth'
 
@@ -178,7 +179,9 @@ function registerIpc(): void {
     return true
   })
   handle('jobs:events', (id: string) => jobEventsFromDb(id))
-  handle('jobs:steer', (id: string, message: string, artifactPath?: string) => steerJob(id, message, artifactPath ?? null))
+  handle('jobs:steer', (id: string, message: string, attachments?: Attachment[]) => steerJob(id, message, attachments))
+  handle('attachments:pick', (target: 'foreman' | string) => pickAndAttach(target, mainWindow))
+  handle('attachments:copy', (target: 'foreman' | string, paths: string[]) => attachPaths(target, paths))
   handle('jobs:isLive', (id: string) => {
     const job = getJob(id)
     return job ? jobIsLive(job) : false
