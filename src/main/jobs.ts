@@ -111,14 +111,17 @@ function maxWorkers(): number {
 
 // ---------- prompts ----------
 
-/** Backend constraint shared by all prompts: this model endpoint rejects image input. */
-const NO_IMAGE_INPUT = [
-  '- RUNTIME CONSTRAINT (critical): this backend REJECTS image input. NEVER use the Read tool on',
-  '  image files (.png/.jpg/.jpeg/.webp) or PDF files - the request fails with',
-  '  "400 Model only support text input" and the session dies. If a WebFetch result is a PDF,',
-  '  do not Read it - find a text source instead.',
-  '- Verify generated art via metadata ONLY: file counts, sizes (ls -la), dimensions via',
-  '  python3 PIL. A human reviews all art visually in the workbench gallery before submit.'
+/** Runtime notes shared by every agent prompt. The backend used to reject
+ *  image input, but the current sonnet/minimax-m3 endpoint takes images
+ *  fine - agents can Read PNG/JPG/WebP/PDF when they actually need to see
+ *  the contents (e.g. an attached reference, a generated card). */
+const RUNTIME_NOTES = [
+  '- This backend accepts image input, so the Read tool works on image files',
+  '  (.png/.jpg/.jpeg/.webp/.gif) and PDFs. Use it when the contents matter.',
+  '- For bulk verification of generated card art, prefer cheap metadata first:',
+  '  file counts, ls -la, python3 PIL for dimensions - only Read the image when',
+  '  you need to actually inspect it. A human still reviews all art visually',
+  '  in the workbench gallery before publish.'
 ].join('\n')
 
 /** When the user disables auto image generation, every prompt gets a rule telling
@@ -166,7 +169,7 @@ export function buildGamePrompt(job: JobRow): string {
       `  from the shared library at ${backLibraryDir()} and copy it to card_back.jpg in this`,
       '  workspace. Only generate a new back if none fits the theme - and then also cp the new',
       '  back into that library (descriptive theme name) so future games reuse it.',
-      NO_IMAGE_INPUT,
+      RUNTIME_NOTES,
       PROTOCOL_CONTRACT,
       imageGenGate()
     ].filter(Boolean).join('\n')
@@ -191,7 +194,7 @@ export function buildGamePrompt(job: JobRow): string {
     `  from the shared library at ${backLibraryDir()} and copy it to card_back.jpg in this`,
     '  workspace. Only generate a new back if none fits the theme - and then also cp the new',
     '  back into that library (descriptive theme name) so future games reuse it.',
-    NO_IMAGE_INPUT,
+    RUNTIME_NOTES,
     imageGenGate(),
     PROTOCOL_CONTRACT
   ]
@@ -216,7 +219,7 @@ export function buildLocalizePrompt(parent: JobRow, language: 'zh-Hans' | 'ja'):
     '- Work inside the current directory (this is your job workspace).',
     '- CRITICAL: Do NOT run `card0 game submit`. A human reviews the cards first.',
     '- Write result.json in this directory with the same shape as the English job.',
-    NO_IMAGE_INPUT,
+    RUNTIME_NOTES,
     PROTOCOL_CONTRACT,
     imageGenGate()
   ].filter(Boolean).join('\n')
@@ -368,7 +371,7 @@ function buildResumePrompt(): string {
     'Continue from where you left off in this same workspace - do NOT redo completed stages;',
     'reuse the files already on disk. Finish the pipeline per the original instructions,',
     'maintain .workbench/tasks.json, and write result.json when done.',
-    NO_IMAGE_INPUT,
+    RUNTIME_NOTES,
     PROTOCOL_CONTRACT
   ].join('\n')
 }
@@ -777,7 +780,7 @@ export function steerJob(jobId: string, message: string, attachments?: Attachmen
     'Continue in this same workspace. Update .workbench/tasks.json as you work.',
     'If you change the card0 game, update result.json afterwards.',
     'Do NOT run `card0 game submit` - the human still reviews before publishing.',
-    NO_IMAGE_INPUT
+    RUNTIME_NOTES
   ].join('\n')
 
   executeJobWithPrompt(jobId, prompt, { resumeSessionId: job.session_id })
