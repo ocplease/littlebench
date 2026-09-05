@@ -135,8 +135,13 @@ export default function SettingsView() {
 
   useEffect(() => {
     window.api.getSettings().then((v) => {
-      setS(v as Settings)
-      setSnapshot(JSON.stringify(v))
+      // A blank model must never display as "Sonnet" while saving nothing -
+      // that's how builds silently run on the CLI's own default model.
+      const s = v as Settings
+      if (!s.model?.trim()) s.model = DEFAULT_MODEL
+      if (!s.triageModel?.trim()) s.triageModel = 'haiku'
+      setS(s)
+      setSnapshot(JSON.stringify(s))
     })
   }, [])
 

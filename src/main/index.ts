@@ -3,7 +3,7 @@ import path from 'node:path'
 import { readFileSync, existsSync } from 'node:fs'
 import { ensureDirs, jobWorkspace, workbenchRoot } from './paths'
 import { installSkills } from './skills'
-import { getDb, getSetting, setSetting, listVideos, listJobs, getJob, listGames, listArtifactsByJob, listMessages, listForemanMessages } from './db'
+import { getDb, getSetting, setSetting, normalizeSettings, listVideos, listJobs, getJob, listGames, listArtifactsByJob, listMessages, listForemanMessages } from './db'
 import { setBroadcast, setShuttingDown, createJob, startJob, stopJob, pauseJob, resumeJob, approveJob, syncJobStatus, discardJob, deleteJob, restartJob, steerJob, jobEventsFromDb, listArtifacts, recoverInterrupted, pumpQueue, openGame, jobIsLive } from './jobs'
 import { ingestChannel, scoutVideos, deepScoutVideo } from './ingest'
 import { updateVideoStatus, updateVideoScout, deleteVideo } from './db'
@@ -253,6 +253,7 @@ app.whenReady().then(() => {
   ensureDirs()
   installSkills(workbenchRoot()) // skills for sessions spawned at the workbench root (foreman)
   getDb()
+  normalizeSettings()
   setBroadcast(broadcast)
   setForemanBroadcast(broadcast)
   setCard0Broadcast(broadcast)

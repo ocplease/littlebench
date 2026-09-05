@@ -190,6 +190,20 @@ export function getSetting(key: string, fallback: string): string {
   return row ? row.value : fallback
 }
 
+/** A blank stored value beats the fallback in getSetting, so a `model` row
+ *  set to '' silently makes every agent run without --model (the CLI then
+ *  uses its own settings.json default - a different model entirely). Blank
+ *  model settings are normalized to the real defaults once at startup. */
+export function normalizeSettings(): void {
+  const defaults: Array<[string, string]> = [
+    ['model', 'sonnet'],
+    ['triageModel', 'haiku']
+  ]
+  for (const [key, fallback] of defaults) {
+    if (!getSetting(key, fallback).trim()) setSetting(key, fallback)
+  }
+}
+
 export function setSetting(key: string, value: string): void {
   getDb()
     .prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
